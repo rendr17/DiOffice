@@ -15,6 +15,20 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+        env:
+          POSTGRES_DB: dioffice_test
+          POSTGRES_USER: dioffice
+          POSTGRES_PASSWORD: dioffice-ci-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U dioffice -d dioffice_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -56,6 +70,8 @@ jobs:
 
       - name: Test Go API
         working-directory: apps/api
+        env:
+          MIGRATION_TEST_DATABASE_URL: postgres://dioffice:dioffice-ci-only@127.0.0.1:5432/dioffice_test?sslmode=disable
         run: go test ./...
 
       - name: Install execution-spike dependencies

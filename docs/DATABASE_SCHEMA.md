@@ -74,7 +74,7 @@ This is a conceptual domain model, not executable DDL or a complete implementati
 
 - id
 - project_id
-- assignee_employee_id nullable
+- assignee_employee_id (required in v0.1; `task.created` requires an assignee)
 - title
 - description
 - acceptance_criteria
