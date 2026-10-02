@@ -1,0 +1,2047 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dioffice:schema:event-envelope:1.0.0",
+  "title": "DiOffice normalized event envelope v1.0.0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "schemaVersion",
+    "eventType",
+    "organizationId",
+    "projectId",
+    "taskId",
+    "employeeId",
+    "attemptId",
+    "sessionId",
+    "workspaceId",
+    "streamSequence",
+    "occurredAt",
+    "recordedAt",
+    "producer",
+    "actor",
+    "correlationId",
+    "causationId",
+    "data"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "schemaVersion": {
+      "const": "1.0.0"
+    },
+    "eventType": {
+      "enum": [
+        "task.created",
+        "task.updated",
+        "task.state_changed",
+        "task.instruction_added",
+        "employee.state_changed",
+        "execution_attempt.state_changed",
+        "workspace.state_changed",
+        "session.started",
+        "session.paused",
+        "session.resumed",
+        "session.completed",
+        "session.failed",
+        "session.canceled",
+        "agent.message",
+        "file.activity",
+        "command.started",
+        "command.output",
+        "command.completed",
+        "command.failed",
+        "check.started",
+        "check.passed",
+        "check.failed",
+        "check.overridden",
+        "preview.started",
+        "preview.screenshot_captured",
+        "preview.failed",
+        "git.commit_created",
+        "git.push_completed",
+        "git.push_failed",
+        "pull_request.created",
+        "pull_request.updated",
+        "approval.requested",
+        "approval.resolved",
+        "artifact.created",
+        "audit.action_recorded"
+      ]
+    },
+    "organizationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "projectId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "taskId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "employeeId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 1
+    },
+    "attemptId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "sessionId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "workspaceId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "streamSequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "recordedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "producer": {
+      "enum": [
+        "api",
+        "workflow",
+        "gateway",
+        "worker",
+        "runtime_adapter",
+        "github_webhook",
+        "reconciler"
+      ]
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "owner",
+            "employee",
+            "system",
+            "integration"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "causationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "uuid"
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "task.created"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/task.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "task.updated"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/task.updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "task.state_changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/task.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "task.instruction_added"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/task.instruction_added"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "employee.state_changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/employee.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "execution_attempt.state_changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/execution_attempt.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "workspace.state_changed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/workspace.state_changed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "session.started"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/session.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "session.paused"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/session.paused"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "session.resumed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/session.resumed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "session.completed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/session.completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "session.failed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/session.failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "session.canceled"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/session.canceled"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "agent.message"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/agent.message"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "file.activity"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/file.activity"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "command.started"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/command.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "command.output"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/command.output"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "command.completed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/command.completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "command.failed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/command.failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "check.started"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/check.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "check.passed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/check.passed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "check.failed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/check.failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "check.overridden"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/check.overridden"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "preview.started"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/preview.started"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "preview.screenshot_captured"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/preview.screenshot_captured"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "preview.failed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/preview.failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "git.commit_created"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/git.commit_created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "git.push_completed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/git.push_completed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "git.push_failed"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/git.push_failed"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "pull_request.created"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/pull_request.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "pull_request.updated"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/pull_request.updated"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "approval.requested"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/approval.requested"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "approval.resolved"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/approval.resolved"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "artifact.created"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/artifact.created"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "eventType": {
+            "const": "audit.action_recorded"
+          }
+        },
+        "required": [
+          "eventType"
+        ]
+      },
+      "then": {
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/eventData/audit.action_recorded"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "checkRunId",
+        "checkId",
+        "name",
+        "commitSha",
+        "required"
+      ],
+      "properties": {
+        "checkRunId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "checkId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "commitSha": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+        },
+        "required": {
+          "type": "boolean"
+        }
+      }
+    },
+    "eventData": {
+      "task.created": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "description",
+          "assigneeEmployeeId",
+          "priority",
+          "initialState",
+          "acceptanceCriteria"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "description": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 20000
+          },
+          "assigneeEmployeeId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "priority": {
+            "enum": [
+              "LOW",
+              "NORMAL",
+              "HIGH",
+              "URGENT"
+            ]
+          },
+          "initialState": {
+            "const": "DRAFT"
+          },
+          "acceptanceCriteria": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "minItems": 0,
+            "maxItems": 100
+          },
+          "manifestDigest": {
+            "oneOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-fA-F0-9]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "task.updated": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "changedFields",
+          "newVersion"
+        ],
+        "properties": {
+          "changedFields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "minItems": 1,
+            "maxItems": 100,
+            "uniqueItems": true
+          },
+          "newVersion": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "task.state_changed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fromState",
+          "toState",
+          "taskVersion",
+          "reason"
+        ],
+        "properties": {
+          "fromState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "DRAFT",
+              "BACKLOG",
+              "READY",
+              "PROVISIONING",
+              "IN_PROGRESS",
+              "WAITING_APPROVAL",
+              "BLOCKED",
+              "IN_REVIEW",
+              "DONE",
+              "FAILED",
+              "CANCELED"
+            ]
+          },
+          "toState": {
+            "enum": [
+              "DRAFT",
+              "BACKLOG",
+              "READY",
+              "PROVISIONING",
+              "IN_PROGRESS",
+              "WAITING_APPROVAL",
+              "BLOCKED",
+              "IN_REVIEW",
+              "DONE",
+              "FAILED",
+              "CANCELED"
+            ]
+          },
+          "taskVersion": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 500
+          }
+        }
+      },
+      "task.instruction_added": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "instructionId",
+          "kind",
+          "summary"
+        ],
+        "properties": {
+          "instructionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "initial",
+              "steering",
+              "revision"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "employee.state_changed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fromState",
+          "toState",
+          "reason"
+        ],
+        "properties": {
+          "fromState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "IDLE",
+              "PLANNING",
+              "RESEARCHING",
+              "CODING",
+              "TESTING",
+              "PREVIEWING",
+              "WAITING_APPROVAL",
+              "BLOCKED",
+              "WAITING_REVIEW",
+              "ERROR",
+              "DONE"
+            ]
+          },
+          "toState": {
+            "enum": [
+              "IDLE",
+              "PLANNING",
+              "RESEARCHING",
+              "CODING",
+              "TESTING",
+              "PREVIEWING",
+              "WAITING_APPROVAL",
+              "BLOCKED",
+              "WAITING_REVIEW",
+              "ERROR",
+              "DONE"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "execution_attempt.state_changed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fromState",
+          "toState",
+          "attemptNumber",
+          "reasonCode"
+        ],
+        "properties": {
+          "fromState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "CREATED",
+              "PROVISIONING",
+              "RUNNING",
+              "WAITING_APPROVAL",
+              "SUCCEEDED",
+              "FAILED",
+              "CANCELED",
+              "ABORTED"
+            ]
+          },
+          "toState": {
+            "enum": [
+              "CREATED",
+              "PROVISIONING",
+              "RUNNING",
+              "WAITING_APPROVAL",
+              "SUCCEEDED",
+              "FAILED",
+              "CANCELED",
+              "ABORTED"
+            ]
+          },
+          "attemptNumber": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "reasonCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "workspace.state_changed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fromState",
+          "toState",
+          "branchName",
+          "workerProfile"
+        ],
+        "properties": {
+          "fromState": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "PROVISIONING",
+              "READY",
+              "IN_USE",
+              "RETAINED",
+              "CLEANUP_PENDING",
+              "CLEANED",
+              "FAILED"
+            ]
+          },
+          "toState": {
+            "enum": [
+              "PROVISIONING",
+              "READY",
+              "IN_USE",
+              "RETAINED",
+              "CLEANUP_PENDING",
+              "CLEANED",
+              "FAILED"
+            ]
+          },
+          "branchName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "workerProfile": {
+            "enum": [
+              "node-22-pnpm-10-playwright"
+            ]
+          }
+        }
+      },
+      "session.started": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtimeType",
+          "capabilities"
+        ],
+        "properties": {
+          "runtimeType": {
+            "enum": [
+              "opencode"
+            ]
+          },
+          "capabilities": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "minItems": 0,
+            "maxItems": 32,
+            "uniqueItems": true
+          }
+        }
+      },
+      "session.paused": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "session.resumed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "session.canceled": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          }
+        }
+      },
+      "session.completed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "enum": [
+              "handoff_ready",
+              "stopped",
+              "no_changes"
+            ]
+          }
+        }
+      },
+      "session.failed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "errorCode",
+          "retryable"
+        ],
+        "properties": {
+          "errorCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
+      "agent.message": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "summary"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "progress",
+              "result",
+              "question"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        }
+      },
+      "file.activity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation",
+          "path"
+        ],
+        "properties": {
+          "operation": {
+            "enum": [
+              "read",
+              "created",
+              "modified",
+              "deleted"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024,
+            "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+          },
+          "additions": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "deletions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "command.started": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commandId",
+          "displayCommand",
+          "classification"
+        ],
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayCommand": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          },
+          "classification": {
+            "enum": [
+              "install",
+              "start",
+              "check",
+              "preview",
+              "git",
+              "other"
+            ]
+          },
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "command.output": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commandId",
+          "stream",
+          "chunkSequence",
+          "text",
+          "redacted"
+        ],
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stream": {
+            "enum": [
+              "stdout",
+              "stderr"
+            ]
+          },
+          "chunkSequence": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 32768
+          },
+          "redacted": {
+            "const": true
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "command.completed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commandId",
+          "exitCode",
+          "durationMs"
+        ],
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "exitCode": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 255
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "command.failed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commandId",
+          "errorCode",
+          "durationMs"
+        ],
+        "properties": {
+          "commandId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "errorCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "check.started": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "checkRunId",
+          "checkId",
+          "name",
+          "commitSha",
+          "required"
+        ],
+        "properties": {
+          "checkRunId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "required": {
+            "type": "boolean"
+          }
+        }
+      },
+      "check.passed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "checkRunId",
+          "checkId",
+          "name",
+          "commitSha",
+          "durationMs"
+        ],
+        "properties": {
+          "checkRunId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "check.failed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "checkRunId",
+          "checkId",
+          "name",
+          "commitSha",
+          "durationMs",
+          "failureCode"
+        ],
+        "properties": {
+          "checkRunId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checkId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "failureCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "check.overridden": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "checkRunId",
+          "commitSha",
+          "ownerId",
+          "reason"
+        ],
+        "properties": {
+          "checkRunId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "ownerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      },
+      "preview.started": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "port",
+          "route",
+          "viewports"
+        ],
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^/(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).*$"
+          },
+          "viewports": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "width",
+                "height"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "width": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 3840
+                },
+                "height": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 2160
+                }
+              }
+            },
+            "minItems": 1,
+            "maxItems": 4
+          }
+        }
+      },
+      "preview.screenshot_captured": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactId",
+          "commitSha",
+          "route",
+          "viewport",
+          "capturedAt"
+        ],
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^/(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).*$"
+          },
+          "viewport": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "width",
+              "height"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "width": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3840
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 2160
+              }
+            }
+          },
+          "capturedAt": {
+            "type": "string",
+            "minLength": 1,
+            "format": "date-time"
+          }
+        }
+      },
+      "preview.failed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "route",
+          "failureCode"
+        ],
+        "properties": {
+          "route": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "pattern": "^/(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).*$"
+          },
+          "failureCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "git.commit_created": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "commitSha",
+          "treeSha",
+          "branchName",
+          "message"
+        ],
+        "properties": {
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "treeSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "branchName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      },
+      "git.push_completed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "branchName",
+          "commitSha"
+        ],
+        "properties": {
+          "branchName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          }
+        }
+      },
+      "git.push_failed": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "branchName",
+          "commitSha",
+          "failureCode"
+        ],
+        "properties": {
+          "branchName": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 250
+          },
+          "commitSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "failureCode": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
+        }
+      },
+      "pull_request.created": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "number",
+          "url",
+          "headSha",
+          "baseSha",
+          "state"
+        ],
+        "properties": {
+          "provider": {
+            "const": "github"
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048,
+            "format": "uri"
+          },
+          "headSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "baseSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "DRAFT"
+            ]
+          }
+        }
+      },
+      "pull_request.updated": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "number",
+          "change",
+          "headSha",
+          "state"
+        ],
+        "properties": {
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "change": {
+            "enum": [
+              "head",
+              "base",
+              "state",
+              "draft"
+            ]
+          },
+          "headSha": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{40}([a-fA-F0-9]{24})?$"
+          },
+          "state": {
+            "enum": [
+              "OPEN",
+              "DRAFT",
+              "MERGED",
+              "CLOSED"
+            ]
+          }
+        }
+      },
+      "approval.requested": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "approvalId",
+          "actionType",
+          "actionDigest",
+          "policyVersion",
+          "expiresAt"
+        ],
+        "properties": {
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "actionType": {
+            "enum": [
+              "dependency_change",
+              "destructive_action",
+              "permission_expansion",
+              "check_override",
+              "merge",
+              "other"
+            ]
+          },
+          "actionDigest": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "policyVersion": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "expiresAt": {
+            "type": "string",
+            "minLength": 1,
+            "format": "date-time"
+          }
+        }
+      },
+      "approval.resolved": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "approvalId",
+          "outcome",
+          "reason"
+        ],
+        "properties": {
+          "approvalId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "enum": [
+              "APPROVED",
+              "DENIED",
+              "EXPIRED",
+              "CANCELED"
+            ]
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          }
+        }
+      },
+      "artifact.created": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "artifactId",
+          "kind",
+          "mimeType",
+          "sizeBytes",
+          "sha256"
+        ],
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "enum": [
+              "screenshot",
+              "browser_capture",
+              "log_archive",
+              "diff",
+              "terminal_capture",
+              "generated_asset",
+              "other"
+            ]
+          },
+          "mimeType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 127
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          }
+        }
+      },
+      "audit.action_recorded": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "action",
+          "targetType",
+          "targetId",
+          "outcome"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "targetType": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "outcome": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "manifestVersion": 1,
+  "workerProfile": "node-22-pnpm-10-playwright",
+  "workingDirectory": ".",
+  "networkProfile": "package-registries",
+  "environment": {
+    "passThrough": ["CI", "NODE_ENV"]
+  },
+  "commands": {
+    "install": {
+      "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+      "timeoutSeconds": 600
+    },
+    "start": {
+      "argv": ["corepack", "pnpm", "dev", "--host", "0.0.0.0", "--port", "3000"],
+      "timeoutSeconds": 60
+    },
+    "checks": [
+      {
+        "id": "lint",
+        "name": "Lint",
+        "argv": ["corepack", "pnpm", "lint"],
+        "required": true,
+        "timeoutSeconds": 300
+      },
+      {
+        "id": "test",
+        "name": "Unit tests",
+        "argv": ["corepack", "pnpm", "test", "--", "--run"],
+        "required": true,
+        "timeoutSeconds": 600
+      },
+      {
+        "id": "build",
+        "name": "Production build",
+        "argv": ["corepack", "pnpm", "build"],
+        "required": true,
+        "timeoutSeconds": 600
+      }
+    ]
+  },
+  "preview": {
+    "port": 3000,
+    "healthPath": "/",
+    "readinessTimeoutSeconds": 120,
+    "routes": ["/"],
+    "viewports": [
+      {"name": "desktop", "width": 1440, "height": 900},
+      {"name": "mobile", "width": 375, "height": 812}
+    ]
+  },
+  "resources": {
+    "cpu": 2,
+    "memoryMiB": 4096,
+    "diskGiB": 10,
+    "attemptTimeoutSeconds": 1800
+  }
+}

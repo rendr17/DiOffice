@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:dioffice:schema:execution-manifest:1.0.0",
+  "title": "DiOffice repository execution manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifestVersion", "workerProfile", "workingDirectory", "networkProfile", "environment", "commands", "preview", "resources"],
+  "properties": {
+    "manifestVersion": {"const": 1},
+    "workerProfile": {"enum": ["node-22-pnpm-10-playwright"]},
+    "workingDirectory": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^(?!/)(?![A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$)).*$"},
+    "networkProfile": {"enum": ["none", "package-registries"]},
+    "environment": {
+      "type": "object", "additionalProperties": false, "required": ["passThrough"],
+      "properties": {
+        "passThrough": {
+          "type": "array", "uniqueItems": true, "maxItems": 32,
+          "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$"}
+        }
+      }
+    },
+    "commands": {
+      "type": "object", "additionalProperties": false, "required": ["install", "start", "checks"],
+      "properties": {
+        "install": {"$ref": "#/$defs/command"},
+        "start": {"$ref": "#/$defs/command"},
+        "checks": {
+          "type": "array", "minItems": 1, "maxItems": 20,
+          "contains": {"type": "object", "properties": {"required": {"const": true}}, "required": ["required"]},
+          "items": {"$ref": "#/$defs/check"}
+        }
+      }
+    },
+    "preview": {
+      "type": "object", "additionalProperties": false,
+      "required": ["port", "healthPath", "readinessTimeoutSeconds", "routes", "viewports"],
+      "properties": {
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "healthPath": {"type": "string", "pattern": "^/", "maxLength": 512},
+        "readinessTimeoutSeconds": {"type": "integer", "minimum": 5, "maximum": 600},
+        "routes": {"type": "array", "minItems": 1, "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^/", "maxLength": 512}},
+        "viewports": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"$ref": "#/$defs/viewport"}}
+      }
+    },
+    "resources": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cpu", "memoryMiB", "diskGiB", "attemptTimeoutSeconds"],
+      "properties": {
+        "cpu": {"type": "number", "exclusiveMinimum": 0, "maximum": 4},
+        "memoryMiB": {"type": "integer", "minimum": 512, "maximum": 8192},
+        "diskGiB": {"type": "integer", "minimum": 1, "maximum": 20},
+        "attemptTimeoutSeconds": {"type": "integer", "minimum": 60, "maximum": 3600}
+      }
+    }
+  },
+  "$defs": {
+    "argv": {
+      "type": "array", "minItems": 1, "maxItems": 64,
+      "items": {"type": "string", "minLength": 1, "maxLength": 2048}
+    },
+    "command": {
+      "type": "object", "additionalProperties": false, "required": ["argv", "timeoutSeconds"],
+      "properties": {
+        "argv": {"$ref": "#/$defs/argv"},
+        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "check": {
+      "type": "object", "additionalProperties": false, "required": ["id", "name", "argv", "required", "timeoutSeconds"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"},
+        "name": {"type": "string", "minLength": 1, "maxLength": 128},
+        "argv": {"$ref": "#/$defs/argv"},
+        "required": {"type": "boolean"},
+        "timeoutSeconds": {"type": "integer", "minimum": 1, "maximum": 3600}
+      }
+    },
+    "viewport": {
+      "type": "object", "additionalProperties": false, "required": ["name", "width", "height"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1, "maxLength": 64},
+        "width": {"type": "integer", "minimum": 1, "maximum": 3840},
+        "height": {"type": "integer", "minimum": 1, "maximum": 2160}
+      }
+    }
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "version": "0.1",
+  "recommendedSourceGridPx": 16,
+  "rendering": {
+    "pixelArt": true,
+    "smoothing": false,
+    "recommendedIntegerScale": [2, 3, 4]
+  },
+  "assets": [
+    {
+      "id": "2dpig-pixel-office-assets",
+      "path": "2dpig/PixelOfficeAssets.png",
+      "width": 256,
+      "height": 160,
+      "license": "CC0-1.0",
+      "canonicalSource": "https://2dpig.itch.io/pixel-office",
+      "purpose": ["characters", "office-furniture", "computers", "decor"]
+    },
+    {
+      "id": "office-stuff-meeting",
+      "path": "office_stuff/meeting_office.png",
+      "width": 48,
+      "height": 48,
+      "license": "CC0",
+      "canonicalSource": "https://opengameart.org/content/office-stuff",
+      "purpose": ["meeting-reference", "supplementary-prop"]
+    },
+    {
+      "id": "office-stuff-woman",
+      "path": "office_stuff/woman_office.png",
+      "width": 48,
+      "height": 48,
+      "license": "CC0",
+      "canonicalSource": "https://opengameart.org/content/office-stuff",
+      "purpose": ["character-reference", "supplementary-sprite"]
+    }
+  ]
+}

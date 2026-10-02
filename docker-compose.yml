@@ -1,0 +1,40 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: dioffice
+      POSTGRES_USER: dioffice
+      POSTGRES_PASSWORD: dioffice
+    ports:
+      - "5432:5432"
+    volumes:
+      - dioffice_postgres:/var/lib/postgresql/data
+
+  temporal:
+    image: temporalio/auto-setup:latest
+    depends_on:
+      - postgres
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: dioffice
+      POSTGRES_PWD: dioffice
+      POSTGRES_SEEDS: postgres
+    ports:
+      - "7233:7233"
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: change-me
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - dioffice_minio:/data
+
+volumes:
+  dioffice_postgres:
+  dioffice_minio:
