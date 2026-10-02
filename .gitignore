@@ -12,3 +12,11 @@ coverage/
 # Python cache files
 __pycache__/
 *.py[cod]
+
+# TypeScript tooling
+*.tsbuildinfo
+.vite/
+
+# Go build/test artifacts
+*.test
+coverage.out

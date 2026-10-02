@@ -49,7 +49,8 @@
 
 ### Storage
 - PostgreSQL for structured state
-- S3-compatible storage / MinIO for screenshots and artifacts
+- S3-compatible storage for screenshots and artifacts; provider remains configurable
+- S3Mock is a local-only S3 API test double and is not production storage
 
 ## High-level topology
 

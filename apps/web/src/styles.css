@@ -1,0 +1,67 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+
+:root {
+  font-family: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  color: #253329;
+  background: #f4f1e9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(ellipse at 82% 13%, rgba(207, 224, 197, 0.55), transparent 32rem),
+    #f4f1e9;
+}
+
+a { color: inherit; text-decoration: none; }
+
+.page-shell {
+  width: min(100% - 48px, 1120px);
+  min-height: 100vh;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 26px 0;
+  border-bottom: 1px solid #d9ded3;
+}
+
+.brand { display: inline-flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: -0.03em; }
+.brand-mark { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 10px; color: #fffdf7; background: #385c48; font-family: Manrope, sans-serif; font-size: 16px; }
+.environment-label, .eyebrow, .next-step-label { color: #68776a; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; }
+
+.hero { max-width: 760px; padding: clamp(72px, 12vh, 132px) 0 56px; }
+.eyebrow { margin: 0 0 18px; }
+h1 { max-width: 700px; margin: 0; font-family: Manrope, 'DM Sans', sans-serif; font-size: clamp(42px, 7vw, 76px); line-height: 1.04; letter-spacing: -0.065em; }
+.intro { max-width: 620px; margin: 24px 0 36px; color: #5c6b60; font-size: 18px; line-height: 1.65; }
+
+.foundation-card { display: flex; align-items: center; gap: 14px; padding: 20px 22px; border: 1px solid #d8dfd4; border-radius: 16px; background: rgba(255, 255, 251, 0.82); box-shadow: 0 16px 36px rgba(42, 62, 48, 0.06); }
+.status-dot { flex: 0 0 auto; width: 10px; height: 10px; border-radius: 50%; background: #c18b4a; box-shadow: 0 0 0 5px #f6eddf; }
+.foundation-card strong { display: block; font-size: 15px; }
+.foundation-card p { margin: 5px 0 0; color: #68776a; font-size: 14px; }
+.card-note { margin-left: auto; color: #849084; font-size: 12px; }
+
+.next-step { margin-top: 42px; padding-top: 20px; border-top: 1px solid #d9ded3; }
+.next-step-label { font-size: 10px; }
+.next-step p { margin: 8px 0 0; color: #425849; font-weight: 600; }
+
+@media (max-width: 600px) {
+  .page-shell { width: min(100% - 32px, 1120px); }
+  .topbar { padding: 20px 0; }
+  .environment-label { font-size: 9px; }
+  .hero { padding-top: 74px; }
+  .intro { font-size: 16px; }
+  .foundation-card { align-items: flex-start; padding: 18px; }
+  .card-note { display: none; }
+}

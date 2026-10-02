@@ -44,7 +44,49 @@ Buktikan satu flow end-to-end nyata:
 - Execution isolation: Docker + git worktree (`tools/execution-spike/README.md` documents an experimental command-check smoke test; not production-ready)
 - Realtime: REST commands + project-scoped SSE with durable replay cursor
 - Workflow durability: Temporal
-- Object storage: S3-compatible / MinIO untuk local development
+- Object storage: S3-compatible; S3Mock hanya untuk local integration test (bukan production storage)
+
+## Project foundation
+
+Monorepo scaffold saat ini:
+
+- `apps/api` — Go HTTP API, liveness endpoint, dan test dasar.
+- `apps/web` — React + TypeScript + Vite shell; belum menampilkan task atau aktivitas palsu.
+- `apps/agent-gateway` — Node.js + TypeScript health endpoint; belum memanggil OpenCode.
+- `db/migrations` — tempat migration SQL; model database saat ini masih logical, belum executable DDL.
+- `tools/execution-spike` — eksperimen Docker lokal, belum worker production.
+
+### Local development
+
+Prerequisites: Go 1.24+, Node.js 22.12+, pnpm 10.34.6, dan Docker Compose.
+
+```bash
+pnpm install
+cp .env.example .env          # PowerShell: Copy-Item .env.example .env
+docker compose up -d postgres temporal s3mock
+pnpm dev                       # Web :5173 + Agent Gateway :4100
+```
+
+Jalankan API di terminal lain:
+
+```bash
+cd apps/api
+go run ./cmd/api               # API :8080, bind ke localhost
+```
+
+Health endpoints: `http://127.0.0.1:8080/healthz` dan `http://127.0.0.1:4100/healthz`.
+Compose menjalankan PostgreSQL di `127.0.0.1:15432`, Temporal di `127.0.0.1:7233`, dan S3Mock di `127.0.0.1:9090`; sesuaikan `POSTGRES_HOST_PORT`/`S3_HOST_PORT` jika port bentrok. S3Mock hanya mengimplementasikan subset S3 untuk test lokal, bukan storage production. Environment Compose hanya untuk development; jangan pakai default-nya di production. Semua port infra bind ke loopback. Belum ada auth, persistence domain, task execution, atau integrasi OpenCode di scaffold ini.
+
+### Local checks
+
+```bash
+pnpm test
+pnpm typecheck
+pnpm build
+cd apps/api && go test ./...
+```
+
+`.github/workflows/ci.yml` menjalankan check Go, JavaScript workspace, contract validation, dan config Compose.
 
 ## Prinsip utama
 
