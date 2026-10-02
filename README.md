@@ -41,7 +41,7 @@ Buktikan satu flow end-to-end nyata:
 - Agent gateway: Node.js + TypeScript
 - Runtime pertama: OpenCode
 - Browser automation: Playwright
-- Execution isolation: Docker + git worktree
+- Execution isolation: Docker + git worktree (`tools/execution-spike/README.md` documents an experimental command-check smoke test; not production-ready)
 - Realtime: REST commands + project-scoped SSE with durable replay cursor
 - Workflow durability: Temporal
 - Object storage: S3-compatible / MinIO untuk local development

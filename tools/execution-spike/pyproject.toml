@@ -1,0 +1,6 @@
+[project]
+name = "dioffice-execution-spike"
+version = "0.1.0"
+description = "Disposable Docker worker execution spike for DiOffice"
+requires-python = ">=3.11"
+dependencies = ["jsonschema>=4.22,<5"]
