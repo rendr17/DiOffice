@@ -1,6 +1,6 @@
 # API database migrations
 
-Versioned PostgreSQL migrations live in the repository-level `db/migrations/` directory. The first migrations establish tenant-scoped identity/project records and the task/event/outbox persistence foundation; they do not make the execution workflow production-ready.
+Versioned PostgreSQL migrations live in the repository-level `db/migrations/` directory. The current migrations establish tenant-scoped identity/project records, Owner password hashes, and the task/event/outbox persistence foundation; they do not make the execution workflow production-ready.
 
 From `apps/api`, set `DATABASE_URL` to a non-production database and run:
 

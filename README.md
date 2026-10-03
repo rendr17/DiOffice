@@ -48,12 +48,12 @@ Buktikan satu flow end-to-end nyata:
 
 ## Project foundation
 
-Monorepo scaffold saat ini:
+Monorepo status saat ini:
 
-- `apps/api` — Go HTTP API, liveness endpoint, dan test dasar.
+- `apps/api` — Go API dengan PostgreSQL readiness, bootstrap Owner, login/session/CSRF, dan create/list task draft endpoints.
 - `apps/web` — React + TypeScript + Vite shell; belum menampilkan task atau aktivitas palsu.
 - `apps/agent-gateway` — Node.js + TypeScript health endpoint; belum memanggil OpenCode.
-- `db/migrations` — tempat migration SQL; model database saat ini masih logical, belum executable DDL.
+- `db/migrations` — executable identity/project, Owner-password, dan task/event/outbox migrations; belum ada execution/approval/PR schema.
 - `tools/execution-spike` — eksperimen Docker lokal, belum worker production.
 
 ### Local development
@@ -67,15 +67,22 @@ docker compose up -d postgres temporal s3mock
 pnpm dev                       # Web :5173 + Agent Gateway :4100
 ```
 
-Jalankan API di terminal lain:
+Jalankan migration, buat Owner dan start API dari `apps/api`. Password bootstrap dibaca via prompt tersembunyi; jangan masukkan password sebagai flag atau commit `.env`.
 
 ```bash
 cd apps/api
+set -a
+source ../../.env
+set +a
+go run ./cmd/migrate
+go run ./cmd/bootstrap-owner --organization "Local DiOffice" --project "Manual test" --email "owner@example.invalid"
+export COOKIE_SECURE=false     # only for local HTTP development
 go run ./cmd/api               # API :8080, bind ke localhost
 ```
 
-Health endpoints: `http://127.0.0.1:8080/healthz` dan `http://127.0.0.1:4100/healthz`.
-Compose menjalankan PostgreSQL di `127.0.0.1:15432`, Temporal di `127.0.0.1:7233`, dan S3Mock di `127.0.0.1:9090`; sesuaikan `POSTGRES_HOST_PORT`/`S3_HOST_PORT` jika port bentrok. S3Mock hanya mengimplementasikan subset S3 untuk test lokal, bukan storage production. Environment Compose hanya untuk development; jangan pakai default-nya di production. Semua port infra bind ke loopback. Belum ada auth, persistence domain, task execution, atau integrasi OpenCode di scaffold ini.
+API liveness/readiness: `http://127.0.0.1:8080/healthz` dan `/readyz`; Agent Gateway health: `http://127.0.0.1:4100/healthz`. `COOKIE_SECURE=false` hanya untuk HTTP loopback local; deployed environments must use HTTPS and secure cookies. Compose menjalankan PostgreSQL di `127.0.0.1:15432`, Temporal di `127.0.0.1:7233`, dan S3Mock di `127.0.0.1:9090`; sesuaikan `POSTGRES_HOST_PORT`/`S3_HOST_PORT` jika port bentrok. S3Mock hanya test double, bukan storage production. Environment Compose hanya development; jangan pakai default-nya di production. Semua port infra bind ke loopback.
+
+Endpoint contract dan langkah smoke test REST ada di [`docs/API.md`](docs/API.md). Authenticated API slice sudah dapat membuat `DRAFT` lalu membacanya kembali, tetapi web UI belum terhubung; Start, runtime/OpenCode, SSE, GitHub checks/PR, approval, dan merge belum diimplementasikan. Migrations tetap eksplisit—API tidak mengubah schema saat startup.
 
 ### Local checks
 

@@ -2,9 +2,9 @@
 
 Database: PostgreSQL
 
-## Logical model only
+## Logical model and implementation status
 
-This is a conceptual domain model, not executable DDL or a complete implementation-ready schema. Before persisting production data, define tenant-consistent foreign keys, types, unique/check constraints, indexes, audit/history/outbox tables, and versioned migrations. Use state, event, and execution contracts linked from `PRD.md` as the source of truth.
+This document includes the target logical model; only the initial identity/project, task/event/outbox, and Owner-password subset is executable today. Those migrations live in `db/migrations/` and are not a complete production schema. Remaining workflow tables and constraints must be added as versioned migrations before those features ship. Use state, event, and execution contracts linked from `PRD.md` as the source of truth.
 
 
 ## organizations
@@ -20,7 +20,15 @@ This is a conceptual domain model, not executable DDL or a complete implementati
 - email
 - display_name
 - role
+- password_hash nullable (bcrypt; password is never stored in plain text)
 - created_at
+
+## user_sessions (implemented)
+
+- id, organization_id, user_id
+- SHA-256 hashes of the opaque session and CSRF tokens (raw tokens are returned only at login)
+- created_at, last_seen_at, expires_at, revoked_at
+- tenant-scoped foreign key to users; expired or revoked sessions cannot authenticate
 
 ## employees
 
