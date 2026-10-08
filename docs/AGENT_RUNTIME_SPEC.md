@@ -41,6 +41,16 @@ Conceptual methods (provider implementation is not an external contract):
 
 Commands, lifecycle, event envelopes, authorization, idempotency, and approvals are owned by DiOffice; the runtime adapter cannot grant permissions.
 
+## Gateway readiness probe
+
+The agent gateway exposes `GET /healthz` for process liveness and `GET /readyz` for an OpenCode preflight. Readiness requires `OPENCODE_SERVER_URL` to be a local HTTP(S) origin and the upstream `GET /global/health` response to contain `healthy: true`; redirects, remote origins, URL credentials, paths, query strings, and fragments are rejected. The gateway returns only a generic readiness state and never reflects the URL or upstream payload.
+
+This probe confirms only that OpenCode responds. It does not validate a repository manifest, worker image, sandbox, task, or credentials, and it does not create a runtime session or authorize Start. Start remains unavailable until the full execution policy and isolated worker are implemented.
+
+### Local project-folder action
+
+The gateway also exposes an internal, loopback-only project-folder bridge for an authenticated Owner action. The API verifies organization/project scope and CSRF before forwarding a fixed `explorer` or `vscode` choice with its server-side gateway token. The gateway resolves the project UUID through the explicit local `AGENT_GATEWAY_PROJECT_FOLDERS` map, confirms the canonical path is a directory, and launches a fixed executable with `shell: false`. It never accepts a filesystem path from the browser or returns the configured path. This opens a folder only; it is not workspace provisioning, task execution, or permission to access arbitrary host files. The bridge is disabled without a sufficiently long internal token and an explicit project mapping.
+
 ## Runtime session
 
 A session is linked to:

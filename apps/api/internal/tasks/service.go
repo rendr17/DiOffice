@@ -10,9 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"github.com/rendr17/dioffice/apps/api/internal/events"
 )
 
 const (
@@ -21,10 +25,11 @@ const (
 )
 
 var (
-	ErrInvalidInput          = errors.New("invalid task input")
-	ErrProjectNotFound       = errors.New("project not found")
-	ErrIdempotencyConflict   = errors.New("idempotency key reused with different request")
-	ErrIdempotencyInProgress = errors.New("idempotent request has no stored result")
+	ErrInvalidInput           = errors.New("invalid task input")
+	ErrProjectNotFound        = errors.New("project not found")
+	ErrReferenceImageNotFound = errors.New("task reference image not found")
+	ErrIdempotencyConflict    = errors.New("idempotency key reused with different request")
+	ErrIdempotencyInProgress  = errors.New("idempotent request has no stored result")
 )
 
 type CreateDraftInput struct {
@@ -37,28 +42,46 @@ type CreateDraftInput struct {
 	Description        string
 	AcceptanceCriteria json.RawMessage
 	RequiredChecks     json.RawMessage
+	ReferenceImages    []ReferenceImage
 	ManifestDigest     string
 	TaskType           string
 	Priority           string
 }
 
 type Task struct {
-	ID                 string          `json:"id"`
-	OrganizationID     string          `json:"organizationId"`
-	ProjectID          string          `json:"projectId"`
-	AssigneeEmployeeID string          `json:"assigneeEmployeeId"`
-	CreatedByUserID    string          `json:"createdByUserId"`
-	Title              string          `json:"title"`
-	Description        string          `json:"description"`
-	AcceptanceCriteria json.RawMessage `json:"acceptanceCriteria"`
-	RequiredChecks     json.RawMessage `json:"requiredChecks"`
-	ManifestDigest     string          `json:"manifestDigest,omitempty"`
-	TaskType           string          `json:"taskType"`
-	Priority           string          `json:"priority"`
-	Status             string          `json:"status"`
-	Version            int64           `json:"version"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	UpdatedAt          time.Time       `json:"updatedAt"`
+	ID                 string           `json:"id"`
+	OrganizationID     string           `json:"organizationId"`
+	ProjectID          string           `json:"projectId"`
+	AssigneeEmployeeID string           `json:"assigneeEmployeeId"`
+	CreatedByUserID    string           `json:"createdByUserId"`
+	Title              string           `json:"title"`
+	Description        string           `json:"description"`
+	AcceptanceCriteria json.RawMessage  `json:"acceptanceCriteria"`
+	RequiredChecks     json.RawMessage  `json:"requiredChecks"`
+	ReferenceImages    []ReferenceImage `json:"referenceImages"`
+	ManifestDigest     string           `json:"manifestDigest,omitempty"`
+	TaskType           string           `json:"taskType"`
+	Priority           string           `json:"priority"`
+	Status             string           `json:"status"`
+	Version            int64            `json:"version"`
+	CreatedAt          time.Time        `json:"createdAt"`
+	UpdatedAt          time.Time        `json:"updatedAt"`
+}
+
+type ReferenceImage struct {
+	ID          string `json:"id"`
+	FileName    string `json:"fileName"`
+	ContentType string `json:"contentType"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	ObjectKey   string `json:"-"`
+	SHA256      string `json:"-"`
+}
+
+type referenceImageHash struct {
+	FileName    string `json:"fileName"`
+	ContentType string `json:"contentType"`
+	SizeBytes   int64  `json:"sizeBytes"`
+	SHA256      string `json:"sha256"`
 }
 
 type Service struct {
@@ -89,13 +112,21 @@ func (s *Service) ListByProject(ctx context.Context, organizationID, projectID s
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id::text, organization_id::text, project_id::text,
-			assignee_employee_id::text, created_by_user_id::text, title, description,
-			acceptance_criteria, required_checks, manifest_digest, task_type, priority,
-			status, task_version, created_at, updated_at
-		FROM tasks
-		WHERE organization_id = $1 AND project_id = $2
-		ORDER BY created_at DESC, id DESC
+		SELECT t.id::text, t.organization_id::text, t.project_id::text,
+			t.assignee_employee_id::text, t.created_by_user_id::text, t.title, t.description,
+			t.acceptance_criteria, t.required_checks, t.manifest_digest, t.task_type, t.priority,
+			t.status, t.task_version, t.created_at, t.updated_at,
+			COALESCE((
+				SELECT jsonb_agg(jsonb_build_object(
+					'id', image.id::text, 'fileName', image.file_name,
+					'contentType', image.content_type, 'sizeBytes', image.size_bytes
+				) ORDER BY image.created_at, image.id)
+				FROM task_reference_images image
+				WHERE image.organization_id = t.organization_id AND image.task_id = t.id
+			), '[]'::jsonb)
+		FROM tasks t
+		WHERE t.organization_id = $1 AND t.project_id = $2
+		ORDER BY t.created_at DESC, t.id DESC
 		LIMIT 100`, organizationID, projectID)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks for project: %w", err)
@@ -106,17 +137,21 @@ func (s *Service) ListByProject(ctx context.Context, organizationID, projectID s
 	for rows.Next() {
 		var task Task
 		var manifestDigest sql.NullString
+		var referenceImagesJSON []byte
 		if err := rows.Scan(
 			&task.ID, &task.OrganizationID, &task.ProjectID, &task.AssigneeEmployeeID,
 			&task.CreatedByUserID, &task.Title, &task.Description,
 			&task.AcceptanceCriteria, &task.RequiredChecks, &manifestDigest,
 			&task.TaskType, &task.Priority, &task.Status, &task.Version,
-			&task.CreatedAt, &task.UpdatedAt,
+			&task.CreatedAt, &task.UpdatedAt, &referenceImagesJSON,
 		); err != nil {
 			return nil, fmt.Errorf("scan project task: %w", err)
 		}
 		if manifestDigest.Valid {
 			task.ManifestDigest = manifestDigest.String
+		}
+		if err := json.Unmarshal(referenceImagesJSON, &task.ReferenceImages); err != nil {
+			return nil, fmt.Errorf("decode task reference images: %w", err)
 		}
 		tasks = append(tasks, task)
 	}
@@ -124,6 +159,31 @@ func (s *Service) ListByProject(ctx context.Context, organizationID, projectID s
 		return nil, fmt.Errorf("iterate project tasks: %w", err)
 	}
 	return tasks, nil
+}
+
+// GetReferenceImage returns image metadata only when the task belongs to the organization.
+func (s *Service) GetReferenceImage(ctx context.Context, organizationID, projectID, taskID, imageID string) (ReferenceImage, error) {
+	if !validUUID(organizationID) || !validUUID(projectID) || !validUUID(taskID) || !validUUID(imageID) {
+		return ReferenceImage{}, fmt.Errorf("%w: organizationId, projectId, taskId, and imageId must be UUIDs", ErrInvalidInput)
+	}
+	if s == nil || s.db == nil {
+		return ReferenceImage{}, errors.New("task service database is not configured")
+	}
+	var image ReferenceImage
+	err := s.db.QueryRowContext(ctx, `
+		SELECT image.id::text, image.file_name, image.content_type, image.size_bytes, image.object_key, image.sha256
+		FROM task_reference_images image
+		JOIN tasks task ON task.organization_id = image.organization_id AND task.id = image.task_id
+		WHERE image.organization_id = $1 AND task.project_id = $2 AND image.task_id = $3 AND image.id = $4`,
+		organizationID, projectID, taskID, imageID).Scan(
+		&image.ID, &image.FileName, &image.ContentType, &image.SizeBytes, &image.ObjectKey, &image.SHA256)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ReferenceImage{}, ErrReferenceImageNotFound
+	}
+	if err != nil {
+		return ReferenceImage{}, fmt.Errorf("query task reference image: %w", err)
+	}
+	return image, nil
 }
 
 // CreateDraft persists a DRAFT task and its event, outbox, audit, and idempotency
@@ -176,6 +236,10 @@ func (s *Service) CreateDraft(ctx context.Context, input CreateDraftInput) (Task
 	if err != nil {
 		return Task{}, false, fmt.Errorf("insert draft task: %w", err)
 	}
+	if err := insertTaskReferenceImages(ctx, tx, input, task.ID); err != nil {
+		return Task{}, false, fmt.Errorf("insert task reference images: %w", err)
+	}
+	task.ReferenceImages = append([]ReferenceImage{}, input.ReferenceImages...)
 
 	eventID, envelope, err := insertTaskCreatedEvent(ctx, tx, input, task, sequence)
 	if err != nil {
@@ -241,6 +305,42 @@ func normalizeAndValidate(input CreateDraftInput) (CreateDraftInput, error) {
 	if utf8.RuneCountInString(input.Description) > 20000 {
 		return CreateDraftInput{}, fmt.Errorf("%w: description must not exceed 20000 characters", ErrInvalidInput)
 	}
+	if input.ReferenceImages == nil {
+		input.ReferenceImages = []ReferenceImage{}
+	}
+	if len(input.ReferenceImages) > 5 {
+		return CreateDraftInput{}, fmt.Errorf("%w: at most 5 reference images are allowed", ErrInvalidInput)
+	}
+	totalImageBytes := int64(0)
+	seenImageIDs := make(map[string]struct{}, len(input.ReferenceImages))
+	seenObjectKeys := make(map[string]struct{}, len(input.ReferenceImages))
+	for index := range input.ReferenceImages {
+		image := &input.ReferenceImages[index]
+		image.ID = strings.ToLower(image.ID)
+		image.ObjectKey = strings.ToLower(image.ObjectKey)
+		image.SHA256 = strings.ToLower(image.SHA256)
+		if !validUUID(image.ID) || image.ObjectKey != "task-reference-images/"+image.ID {
+			return CreateDraftInput{}, fmt.Errorf("%w: reference image %d has an invalid identifier or storage key", ErrInvalidInput, index)
+		}
+		if _, exists := seenImageIDs[image.ID]; exists {
+			return CreateDraftInput{}, fmt.Errorf("%w: reference image IDs must be unique", ErrInvalidInput)
+		}
+		if _, exists := seenObjectKeys[image.ObjectKey]; exists {
+			return CreateDraftInput{}, fmt.Errorf("%w: reference image storage keys must be unique", ErrInvalidInput)
+		}
+		seenImageIDs[image.ID] = struct{}{}
+		seenObjectKeys[image.ObjectKey] = struct{}{}
+		if image.ContentType != "image/png" && image.ContentType != "image/jpeg" {
+			return CreateDraftInput{}, fmt.Errorf("%w: reference image %d has an unsupported content type", ErrInvalidInput, index)
+		}
+		if image.SizeBytes < 1 || image.SizeBytes > 8<<20 || !isSHA256(image.SHA256) || !validReferenceImageName(image.FileName, image.ContentType) {
+			return CreateDraftInput{}, fmt.Errorf("%w: reference image %d has invalid metadata", ErrInvalidInput, index)
+		}
+		totalImageBytes += image.SizeBytes
+	}
+	if totalImageBytes > 40<<20 {
+		return CreateDraftInput{}, fmt.Errorf("%w: total reference image size exceeds 40 MiB", ErrInvalidInput)
+	}
 	input.TaskType = strings.TrimSpace(input.TaskType)
 	if input.TaskType == "" {
 		return CreateDraftInput{}, fmt.Errorf("%w: taskType is required", ErrInvalidInput)
@@ -265,6 +365,22 @@ func normalizeAndValidate(input CreateDraftInput) (CreateDraftInput, error) {
 	return input, nil
 }
 
+func validReferenceImageName(name, contentType string) bool {
+	if name == "" || strings.TrimSpace(name) != name || utf8.RuneCountInString(name) > 124 ||
+		path.Base(name) != name || strings.ContainsRune(name, 92) || strings.ContainsRune(name, 0) {
+		return false
+	}
+	for _, character := range name {
+		if unicode.IsControl(character) {
+			return false
+		}
+	}
+	if contentType == "image/png" {
+		return path.Ext(name) == ".png"
+	}
+	return contentType == "image/jpeg" && path.Ext(name) == ".jpg"
+}
+
 func canonicalJSONArray(raw json.RawMessage) (json.RawMessage, error) {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		raw = json.RawMessage(`[]`)
@@ -280,6 +396,9 @@ func canonicalJSONArray(raw json.RawMessage) (json.RawMessage, error) {
 			return nil, errors.New("multiple JSON values")
 		}
 		return nil, err
+	}
+	if values == nil {
+		values = []any{}
 	}
 	canonical, err := json.Marshal(values)
 	if err != nil {
@@ -311,28 +430,42 @@ func canonicalAcceptanceCriteria(raw json.RawMessage) (json.RawMessage, error) {
 
 func hashRequest(input CreateDraftInput) (string, error) {
 	canonical, err := json.Marshal(struct {
-		OrganizationID     string          `json:"organizationId"`
-		ProjectID          string          `json:"projectId"`
-		AssigneeEmployeeID string          `json:"assigneeEmployeeId"`
-		Title              string          `json:"title"`
-		Description        string          `json:"description"`
-		AcceptanceCriteria json.RawMessage `json:"acceptanceCriteria"`
-		RequiredChecks     json.RawMessage `json:"requiredChecks"`
-		ManifestDigest     string          `json:"manifestDigest,omitempty"`
-		TaskType           string          `json:"taskType"`
-		Priority           string          `json:"priority"`
+		OrganizationID     string               `json:"organizationId"`
+		ProjectID          string               `json:"projectId"`
+		AssigneeEmployeeID string               `json:"assigneeEmployeeId"`
+		Title              string               `json:"title"`
+		Description        string               `json:"description"`
+		AcceptanceCriteria json.RawMessage      `json:"acceptanceCriteria"`
+		RequiredChecks     json.RawMessage      `json:"requiredChecks"`
+		ReferenceImages    []referenceImageHash `json:"referenceImages"`
+		ManifestDigest     string               `json:"manifestDigest,omitempty"`
+		TaskType           string               `json:"taskType"`
+		Priority           string               `json:"priority"`
 	}{
 		OrganizationID: input.OrganizationID, ProjectID: input.ProjectID,
 		AssigneeEmployeeID: input.AssigneeEmployeeID, Title: input.Title,
 		Description: input.Description, AcceptanceCriteria: input.AcceptanceCriteria,
-		RequiredChecks: input.RequiredChecks, ManifestDigest: input.ManifestDigest,
-		TaskType: input.TaskType, Priority: input.Priority,
+		RequiredChecks:  input.RequiredChecks,
+		ReferenceImages: referenceImageHashValues(input.ReferenceImages),
+		ManifestDigest:  input.ManifestDigest,
+		TaskType:        input.TaskType, Priority: input.Priority,
 	})
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(canonical)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func referenceImageHashValues(images []ReferenceImage) []referenceImageHash {
+	values := make([]referenceImageHash, len(images))
+	for index, image := range images {
+		values[index] = referenceImageHash{
+			FileName: image.FileName, ContentType: image.ContentType,
+			SizeBytes: image.SizeBytes, SHA256: image.SHA256,
+		}
+	}
+	return values
 }
 
 func claimIdempotency(ctx context.Context, tx *sql.Tx, input CreateDraftInput, requestHash string) (Task, bool, error) {
@@ -414,6 +547,20 @@ func insertTask(ctx context.Context, tx *sql.Tx, input CreateDraftInput) (Task, 
 	return task, nil
 }
 
+func insertTaskReferenceImages(ctx context.Context, tx *sql.Tx, input CreateDraftInput, taskID string) error {
+	for _, image := range input.ReferenceImages {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_reference_images (
+				organization_id, task_id, id, object_key, file_name, content_type, size_bytes, sha256
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			input.OrganizationID, taskID, image.ID, image.ObjectKey, image.FileName,
+			image.ContentType, image.SizeBytes, image.SHA256); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func insertTaskCreatedEvent(ctx context.Context, tx *sql.Tx, input CreateDraftInput, task Task, sequence int64) (string, []byte, error) {
 	actor, err := json.Marshal(map[string]string{"type": "owner", "id": input.ActorUserID})
 	if err != nil {
@@ -432,6 +579,14 @@ func insertTaskCreatedEvent(ctx context.Context, tx *sql.Tx, input CreateDraftIn
 	}
 	dataJSON, err := json.Marshal(data)
 	if err != nil {
+		return "", nil, err
+	}
+	dataJSON, err = events.SanitizeData("task.created", dataJSON)
+	if err != nil {
+		return "", nil, err
+	}
+	data = nil
+	if err := json.Unmarshal(dataJSON, &data); err != nil {
 		return "", nil, err
 	}
 

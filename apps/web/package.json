@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/App.test.tsx"
+    "test": "tsx --test src/App.test.tsx src/api.test.ts src/task-command.test.ts src/office-ui.test.tsx src/studio-hud.test.tsx src/studio-art.test.tsx src/studio-navigation.test.ts src/studio-owner.test.tsx src/studio-window.test.ts src/project-events.test.ts"
   },
   "dependencies": {
     "react": "19.3.0",

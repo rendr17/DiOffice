@@ -12,15 +12,28 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/rendr17/dioffice/apps/api/internal/auth"
+	"github.com/rendr17/dioffice/apps/api/internal/directory"
+	"github.com/rendr17/dioffice/apps/api/internal/events"
+	"github.com/rendr17/dioffice/apps/api/internal/folderbridge"
 	"github.com/rendr17/dioffice/apps/api/internal/tasks"
 )
 
 type Dependencies struct {
-	DB            *sql.DB
-	Auth          *auth.Service
-	Tasks         *tasks.Service
-	SecureCookies bool
-	WebOrigin     string
+	DB              *sql.DB
+	Auth            *auth.Service
+	Directory       *directory.Service
+	Tasks           *tasks.Service
+	Events          *events.Service
+	ReferenceImages ReferenceImageStore
+	FolderBridge    ProjectFolderBridge
+	SecureCookies   bool
+	WebOrigin       string
+	DevAuthBypass   bool
+}
+
+type ProjectFolderBridge interface {
+	Available(context.Context, string) (bool, error)
+	Open(context.Context, string, folderbridge.Editor) error
 }
 
 const (
@@ -29,6 +42,9 @@ const (
 )
 
 func NewRouter(deps Dependencies) http.Handler {
+	if deps.Events == nil && deps.DB != nil {
+		deps.Events = events.NewService(deps.DB)
+	}
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID, middleware.Recoverer, corsMiddleware(deps.WebOrigin))
 	router.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -54,9 +70,20 @@ func NewRouter(deps Dependencies) http.Handler {
 	})
 
 	router.Post("/api/v1/auth/login", deps.login)
+	if deps.DevAuthBypass {
+		router.Post("/api/v1/auth/dev-session", deps.developmentSession)
+	}
 	router.With(deps.requireIdentity).Get("/api/v1/auth/session", deps.currentSession)
 	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/auth/logout", deps.logout)
+	router.With(deps.requireIdentity).Get("/api/v1/projects", deps.listProjects)
+	router.With(deps.requireIdentity).Get("/api/v1/employees", deps.listEmployees)
+	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/folder", deps.projectFolderStatus)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/folder/open", deps.openProjectFolder)
 	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/tasks", deps.listTasks)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/backlog", deps.saveTaskToBacklog)
+	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/events", deps.listEvents)
+	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/events/stream", deps.streamEvents)
+	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/tasks/{taskID}/reference-images/{imageID}", deps.getTaskReferenceImage)
 	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks", deps.createTask)
 	return router
 }
@@ -80,7 +107,7 @@ func corsMiddleware(webOrigin string) func(http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", webOrigin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-CSRF-Token")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-CSRF-Token, Last-Event-ID")
 			w.Header().Set("Access-Control-Expose-Headers", "Idempotency-Replayed")
 			w.Header().Add("Vary", "Origin")
 			if r.Method == http.MethodOptions {

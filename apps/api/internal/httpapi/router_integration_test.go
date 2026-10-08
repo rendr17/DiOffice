@@ -19,6 +19,8 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/rendr17/dioffice/apps/api/internal/auth"
+	"github.com/rendr17/dioffice/apps/api/internal/directory"
+	"github.com/rendr17/dioffice/apps/api/internal/folderbridge"
 	"github.com/rendr17/dioffice/apps/api/internal/migrations"
 	"github.com/rendr17/dioffice/apps/api/internal/tasks"
 )
@@ -37,8 +39,24 @@ func TestAuthenticatedOwnerCanCreateAndListDraftTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BootstrapOwner() error = %v", err)
 	}
+	var otherOrganizationID string
+	if err := db.QueryRowContext(ctx, `INSERT INTO organizations (name) VALUES ('Other tenant') RETURNING id::text`).Scan(&otherOrganizationID); err != nil {
+		t.Fatalf("create directory isolation tenant: %v", err)
+	}
+	var otherProjectID string
+	if err := db.QueryRowContext(ctx, `INSERT INTO projects (organization_id, name) VALUES ($1, 'Other tenant project') RETURNING id::text`, otherOrganizationID).Scan(&otherProjectID); err != nil {
+		t.Fatalf("create other tenant project: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO employees (organization_id, name, slug, role, department) VALUES ($1, 'Other Deni', 'other-deni', 'Engineer', 'Engineering')`, otherOrganizationID); err != nil {
+		t.Fatalf("create other tenant employee: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO projects (organization_id, name, status) VALUES ($1, 'Archived project', 'ARCHIVED')`, owner.OrganizationID); err != nil {
+		t.Fatalf("create archived project: %v", err)
+	}
+	folderBridge := &folderBridgeStub{available: true}
 	router := NewRouter(Dependencies{
-		DB: db, Auth: authService, Tasks: tasks.NewService(db), SecureCookies: false,
+		DB: db, Auth: authService, Directory: directory.NewService(db), Tasks: tasks.NewService(db), SecureCookies: false,
+		FolderBridge: folderBridge,
 	})
 	ready := httptest.NewRecorder()
 	router.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/readyz", nil))
@@ -51,6 +69,14 @@ func TestAuthenticatedOwnerCanCreateAndListDraftTask(t *testing.T) {
 		"/api/v1/projects/"+owner.ProjectID+"/tasks", nil))
 	if unauthorized.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated list status = %d, want %d", unauthorized.Code, http.StatusUnauthorized)
+	}
+	for _, path := range []string{"/api/v1/projects", "/api/v1/employees", "/api/v1/projects/" + owner.ProjectID + "/folder"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated request %q status = %d, want %d", path, response.Code, http.StatusUnauthorized)
+		}
 	}
 
 	loginBody, _ := json.Marshal(map[string]string{
@@ -81,6 +107,71 @@ func TestAuthenticatedOwnerCanCreateAndListDraftTask(t *testing.T) {
 	}
 	if strings.Contains(loginResponse.Body.String(), sessionCookie.Value) || strings.Contains(loginResponse.Body.String(), csrfCookie.Value) {
 		t.Fatal("login response body exposed a cookie token")
+	}
+
+	folderStatusRequest := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+owner.ProjectID+"/folder", nil)
+	folderStatusRequest.AddCookie(sessionCookie)
+	folderStatusResponse := httptest.NewRecorder()
+	router.ServeHTTP(folderStatusResponse, folderStatusRequest)
+	if folderStatusResponse.Code != http.StatusOK || folderStatusResponse.Body.String() != "{\"available\":true}\n" {
+		t.Fatalf("folder status = %d/%q; want available=true", folderStatusResponse.Code, folderStatusResponse.Body.String())
+	}
+
+	foreignFolderRequest := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+otherProjectID+"/folder", nil)
+	foreignFolderRequest.AddCookie(sessionCookie)
+	foreignFolderResponse := httptest.NewRecorder()
+	router.ServeHTTP(foreignFolderResponse, foreignFolderRequest)
+	if foreignFolderResponse.Code != http.StatusNotFound {
+		t.Fatalf("foreign project folder status = %d, want 404", foreignFolderResponse.Code)
+	}
+
+	openFolderRequest := func(csrfHeader string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/projects/"+owner.ProjectID+"/folder/open",
+			strings.NewReader(`{"editor":"explorer"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.AddCookie(sessionCookie)
+		request.AddCookie(csrfCookie)
+		if csrfHeader != "" {
+			request.Header.Set("X-CSRF-Token", csrfHeader)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	if response := openFolderRequest(""); response.Code != http.StatusForbidden {
+		t.Fatalf("folder open without CSRF status = %d, want 403", response.Code)
+	}
+	openedFolder := openFolderRequest(csrfCookie.Value)
+	if openedFolder.Code != http.StatusAccepted || folderBridge.projectID != owner.ProjectID || folderBridge.editor != folderbridge.EditorExplorer {
+		t.Fatalf("folder open = %d/%+v; want accepted for authorized project in Explorer", openedFolder.Code, folderBridge)
+	}
+
+	for _, path := range []string{"/api/v1/projects", "/api/v1/employees"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.AddCookie(sessionCookie)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("directory request %q status = %d, body %q; want %d", path, response.Code, response.Body.String(), http.StatusOK)
+		}
+		var body struct {
+			Items []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode directory response %q: %v", path, err)
+		}
+		if len(body.Items) != 1 {
+			t.Fatalf("directory response %q has %d items, want 1: %+v", path, len(body.Items), body.Items)
+		}
+		if path == "/api/v1/projects" && (body.Items[0].ID != owner.ProjectID || body.Items[0].Name != "Task API test") {
+			t.Fatalf("project directory item = %+v, want bootstrapped project", body.Items[0])
+		}
+		if path == "/api/v1/employees" && (body.Items[0].ID != owner.EmployeeID || body.Items[0].Name != "Deni") {
+			t.Fatalf("employee directory item = %+v, want bootstrapped Deni", body.Items[0])
+		}
 	}
 
 	taskBody := []byte(`{"assigneeEmployeeId":"` + owner.EmployeeID + `","title":"First API task","description":"Verify persistence through HTTP","acceptanceCriteria":["Task is visible in the list"],"requiredChecks":[],"taskType":"feature","priority":"NORMAL"}`)
@@ -114,6 +205,38 @@ func TestAuthenticatedOwnerCanCreateAndListDraftTask(t *testing.T) {
 	if replay := createRequest(csrfCookie.Value); replay.Code != http.StatusCreated || replay.Header().Get("Idempotency-Replayed") != "true" {
 		t.Fatalf("idempotent replay status/header = %d/%q, want 201/true", replay.Code, replay.Header().Get("Idempotency-Replayed"))
 	}
+	backlogRequest := func(csrfHeader string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost,
+			"/api/v1/projects/"+owner.ProjectID+"/tasks/"+createdTask.ID+"/backlog",
+			strings.NewReader(`{"expectedVersion":1}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Idempotency-Key", "http-task-backlog-001")
+		req.AddCookie(sessionCookie)
+		req.AddCookie(csrfCookie)
+		if csrfHeader != "" {
+			req.Header.Set("X-CSRF-Token", csrfHeader)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+	if response := backlogRequest("wrong-token"); response.Code != http.StatusForbidden {
+		t.Fatalf("backlog transition with invalid CSRF status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+	backlog := backlogRequest(csrfCookie.Value)
+	if backlog.Code != http.StatusOK {
+		t.Fatalf("backlog transition status = %d, body %q; want %d", backlog.Code, backlog.Body.String(), http.StatusOK)
+	}
+	var backlogTask tasks.Task
+	if err := json.Unmarshal(backlog.Body.Bytes(), &backlogTask); err != nil {
+		t.Fatalf("decode backlog task: %v", err)
+	}
+	if backlogTask.ID != createdTask.ID || backlogTask.Status != "BACKLOG" || backlogTask.Version != 2 {
+		t.Fatalf("backlog task = %+v, want original task in BACKLOG at version 2", backlogTask)
+	}
+	if replay := backlogRequest(csrfCookie.Value); replay.Code != http.StatusOK || replay.Header().Get("Idempotency-Replayed") != "true" {
+		t.Fatalf("backlog replay status/header = %d/%q, want 200/true", replay.Code, replay.Header().Get("Idempotency-Replayed"))
+	}
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+owner.ProjectID+"/tasks", nil)
 	listRequest.AddCookie(sessionCookie)
@@ -128,9 +251,26 @@ func TestAuthenticatedOwnerCanCreateAndListDraftTask(t *testing.T) {
 	if err := json.Unmarshal(listResponse.Body.Bytes(), &listBody); err != nil {
 		t.Fatalf("decode task list: %v", err)
 	}
-	if len(listBody.Items) != 1 || listBody.Items[0].ID != createdTask.ID {
-		t.Fatalf("task list = %+v, want exactly the created task", listBody.Items)
+	if len(listBody.Items) != 1 || listBody.Items[0].ID != createdTask.ID || listBody.Items[0].Status != "BACKLOG" {
+		t.Fatalf("task list = %+v, want the created task in BACKLOG", listBody.Items)
 	}
+}
+
+type folderBridgeStub struct {
+	available bool
+	projectID string
+	editor    folderbridge.Editor
+}
+
+func (stub *folderBridgeStub) Available(_ context.Context, projectID string) (bool, error) {
+	stub.projectID = projectID
+	return stub.available, nil
+}
+
+func (stub *folderBridgeStub) Open(_ context.Context, projectID string, editor folderbridge.Editor) error {
+	stub.projectID = projectID
+	stub.editor = editor
+	return nil
 }
 
 func TestHealthAndReadinessAreSeparate(t *testing.T) {

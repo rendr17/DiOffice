@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"time"
 
@@ -47,6 +48,31 @@ func (deps Dependencies) login(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		logInternalError("Owner login failed", err)
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	setSessionCookies(w, session, deps.SecureCookies)
+	writeJSON(w, http.StatusOK, map[string]safeUser{"user": toSafeUser(session.Identity)})
+}
+
+func (deps Dependencies) developmentSession(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Auth == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	if deps.WebOrigin == "" || r.Header.Get("Origin") != deps.WebOrigin || !isLoopbackRemote(r.RemoteAddr) {
+		writeError(w, http.StatusForbidden, "dev_auth_bypass_not_allowed")
+		return
+	}
+	var body struct{}
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	session, err := deps.Auth.CreateDevelopmentSession(r.Context())
+	if err != nil {
+		logInternalError("Development Owner session failed", err)
 		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
 		return
 	}
@@ -161,4 +187,13 @@ func toSafeUser(identity auth.Identity) safeUser {
 		ID: identity.UserID, OrganizationID: identity.OrganizationID,
 		Email: identity.Email, DisplayName: identity.DisplayName, Role: identity.Role,
 	}
+}
+
+func isLoopbackRemote(remoteAddress string) bool {
+	host, _, err := net.SplitHostPort(remoteAddress)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

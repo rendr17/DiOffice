@@ -29,6 +29,18 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      s3mock:
+        image: adobe/s3mock:5.2.3@sha256:ab01a6946750f451ca215a47e91030695b260e4003b8a5a6201d25029b8fca92
+        env:
+          COM_ADOBE_TESTING_S3MOCK_STORE_INITIAL_BUCKETS: dioffice-ci
+          COM_ADOBE_TESTING_S3MOCK_STORE_ROOT: /s3mockroot
+        ports:
+          - 9090:9090
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:9090/favicon.ico"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -71,7 +83,9 @@ jobs:
       - name: Test Go API
         working-directory: apps/api
         env:
-          MIGRATION_TEST_DATABASE_URL: postgres://dioffice:dioffice-ci-only@127.0.0.1:5432/dioffice_test?sslmode=disable
+          MIGRATION_TEST_DATABASE_URL: postgres://dioffice:***@127.0.0.1:5432/dioffice_test?sslmode=disable
+          DIOFFICE_S3_TEST_ENDPOINT: http://127.0.0.1:9090
+          DIOFFICE_S3_TEST_BUCKET: dioffice-ci
         run: go test ./...
 
       - name: Install execution-spike dependencies

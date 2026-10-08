@@ -3,10 +3,18 @@ import assert from 'node:assert/strict';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { App } from './App';
 
-test('shows the real project foundation state without simulated task activity', () => {
+test('shows an honest session-check state without simulated task activity', () => {
   const markup = renderToStaticMarkup(<App />);
 
   assert.match(markup, /DiOffice/);
-  assert.match(markup, /Project foundation/);
-  assert.match(markup, /No task activity is running/);
+  assert.match(markup, /Checking your session/);
+  assert.doesNotMatch(markup, /simulated progress/i);
+});
+
+test('uses the pixel-office shell while checking the real session', () => {
+  const markup = renderToStaticMarkup(<App />);
+
+  assert.match(markup, /pixel-app/);
+  assert.match(markup, /Your little software studio/);
+  assert.doesNotMatch(markup, /Coding|Tests passed|Agent running/);
 });

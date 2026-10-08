@@ -93,6 +93,7 @@ Runtime -> Agent Gateway -> Go event ingestion -> PostgreSQL state/event/outbox 
 - Runtime event parsing
 - Event normalization
 - Runtime-specific errors
+- Loopback-only project-folder opener using an explicit local UUID-to-path allowlist (not task execution)
 
 ### worker
 - Workspace provisioning

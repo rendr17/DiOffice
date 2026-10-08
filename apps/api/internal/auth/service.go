@@ -17,7 +17,11 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const sessionLifetime = 12 * time.Hour
+const (
+	sessionLifetime         = 12 * time.Hour
+	developmentOwnerEmail   = "local-dev-owner@example.invalid"
+	developmentOwnerOrgName = "DiOffice Local Development"
+)
 
 var (
 	ErrInvalidBootstrapInput = errors.New("invalid Owner bootstrap input")
@@ -157,33 +161,76 @@ func (s *Service) Login(ctx context.Context, input LoginInput) (LoginSession, er
 		return LoginSession{}, ErrInvalidCredentials
 	}
 
-	token, err := randomToken()
-	if err != nil {
-		return LoginSession{}, fmt.Errorf("generate session token: %w", err)
+	return createSession(ctx, s.db, identity)
+}
+
+// CreateDevelopmentSession creates or reuses a passwordless local Owner and
+// issues a normal server-side session. Its HTTP route is gated by a loopback-only
+// development flag and must never be exposed in a deployed environment.
+func (s *Service) CreateDevelopmentSession(ctx context.Context) (LoginSession, error) {
+	if s == nil || s.db == nil {
+		return LoginSession{}, errors.New("auth service database is not configured")
 	}
-	csrfToken, err := randomToken()
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return LoginSession{}, fmt.Errorf("generate CSRF token: %w", err)
+		return LoginSession{}, fmt.Errorf("begin development Owner session: %w", err)
 	}
-	tokenHash := sha256.Sum256([]byte(token))
-	csrfHash := sha256.Sum256([]byte(csrfToken))
-	identity.csrfTokenHash = csrfHash[:]
-	var expiresAt time.Time
-	err = s.db.QueryRowContext(ctx, `
-		INSERT INTO user_sessions (
-			organization_id, user_id, token_hash, csrf_token_hash, expires_at
-		) VALUES ($1, $2, $3, $4, now() + interval '12 hours')
-		RETURNING id::text, expires_at`,
-		identity.OrganizationID, identity.UserID, tokenHash[:], csrfHash[:]).Scan(&identity.SessionID, &expiresAt)
+	defer tx.Rollback()
+
+	var lockAcquired bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT pg_advisory_xact_lock(hashtextextended('dioffice-local-dev-owner', 0)) IS NOT NULL`).Scan(&lockAcquired); err != nil {
+		return LoginSession{}, fmt.Errorf("lock development Owner seed: %w", err)
+	}
+	if !lockAcquired {
+		return LoginSession{}, errors.New("development Owner seed lock was not acquired")
+	}
+
+	var identity Identity
+	err = tx.QueryRowContext(ctx, `
+		SELECT u.id::text, u.organization_id::text, u.email, u.display_name, u.role
+		FROM users AS u
+		JOIN organizations AS o ON o.id = u.organization_id
+		WHERE o.name = $1 AND lower(u.email) = $2
+			AND u.display_name = 'Local Development Owner'
+			AND u.role = 'OWNER' AND u.password_hash IS NULL
+		ORDER BY u.created_at
+		LIMIT 1`, developmentOwnerOrgName, developmentOwnerEmail).Scan(
+		&identity.UserID, &identity.OrganizationID, &identity.Email, &identity.DisplayName, &identity.Role)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO organizations (name) VALUES ($1) RETURNING id::text`, developmentOwnerOrgName).Scan(&identity.OrganizationID); err != nil {
+			return LoginSession{}, fmt.Errorf("create development organization: %w", err)
+		}
+		if err := tx.QueryRowContext(ctx, `
+			INSERT INTO users (organization_id, email, display_name, password_hash)
+			VALUES ($1, $2, 'Local Development Owner', NULL)
+			RETURNING id::text, email, display_name, role`,
+			identity.OrganizationID, developmentOwnerEmail).Scan(
+			&identity.UserID, &identity.Email, &identity.DisplayName, &identity.Role); err != nil {
+			return LoginSession{}, fmt.Errorf("create development Owner: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO employees (organization_id, name, slug, role, department)
+			VALUES ($1, 'Deni', 'deni', 'Frontend Engineer', 'Engineering')`, identity.OrganizationID); err != nil {
+			return LoginSession{}, fmt.Errorf("create development employee: %w", err)
+		}
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO projects (organization_id, name) VALUES ($1, 'Local Manual Test')`, identity.OrganizationID); err != nil {
+			return LoginSession{}, fmt.Errorf("create development project: %w", err)
+		}
+	} else if err != nil {
+		return LoginSession{}, fmt.Errorf("look up development Owner: %w", err)
+	}
+
+	session, err := createSession(ctx, tx, identity)
 	if err != nil {
-		return LoginSession{}, fmt.Errorf("create Owner session: %w", err)
+		return LoginSession{}, err
 	}
-	return LoginSession{
-		Identity:     identity,
-		SessionToken: token,
-		CSRFToken:    csrfToken,
-		ExpiresAt:    expiresAt,
-	}, nil
+	if err := tx.Commit(); err != nil {
+		return LoginSession{}, fmt.Errorf("commit development Owner session: %w", err)
+	}
+	return session, nil
 }
 
 func (s *Service) Authenticate(ctx context.Context, sessionToken string) (Identity, error) {
@@ -240,6 +287,36 @@ func (s *Service) compareDummyPassword(password string) {
 	if len(dummyPasswordHash) > 0 && len(password) <= bcryptMaxPasswordBytes {
 		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
 	}
+}
+
+type sessionQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func createSession(ctx context.Context, querier sessionQuerier, identity Identity) (LoginSession, error) {
+	token, err := randomToken()
+	if err != nil {
+		return LoginSession{}, fmt.Errorf("generate session token: %w", err)
+	}
+	csrfToken, err := randomToken()
+	if err != nil {
+		return LoginSession{}, fmt.Errorf("generate CSRF token: %w", err)
+	}
+	tokenHash := sha256.Sum256([]byte(token))
+	csrfHash := sha256.Sum256([]byte(csrfToken))
+	identity.csrfTokenHash = csrfHash[:]
+	var expiresAt time.Time
+	if err := querier.QueryRowContext(ctx, `
+		INSERT INTO user_sessions (
+			organization_id, user_id, token_hash, csrf_token_hash, expires_at
+		) VALUES ($1, $2, $3, $4, now() + interval '12 hours')
+		RETURNING id::text, expires_at`,
+		identity.OrganizationID, identity.UserID, tokenHash[:], csrfHash[:]).Scan(&identity.SessionID, &expiresAt); err != nil {
+		return LoginSession{}, fmt.Errorf("create Owner session: %w", err)
+	}
+	return LoginSession{
+		Identity: identity, SessionToken: token, CSRFToken: csrfToken, ExpiresAt: expiresAt,
+	}, nil
 }
 
 func randomToken() (string, error) {
