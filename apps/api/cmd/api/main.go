@@ -23,6 +23,11 @@ import (
 	"github.com/rendr17/dioffice/apps/api/internal/folderbridge"
 	"github.com/rendr17/dioffice/apps/api/internal/httpapi"
 	"github.com/rendr17/dioffice/apps/api/internal/objectstore"
+	"github.com/rendr17/dioffice/apps/api/internal/providers"
+	"github.com/rendr17/dioffice/apps/api/internal/prrunner"
+	"github.com/rendr17/dioffice/apps/api/internal/repositories"
+	"github.com/rendr17/dioffice/apps/api/internal/secrets"
+	"github.com/rendr17/dioffice/apps/api/internal/sessionrunner"
 	"github.com/rendr17/dioffice/apps/api/internal/tasks"
 )
 
@@ -80,13 +85,41 @@ func run() error {
 		return err
 	}
 
+	// Provider abort is wired only when the API can reach a runtime; without
+	// it Cancel/Retry still record session.state CANCELED durably.
+	taskService := tasks.NewService(db)
+	if runtimeURL := os.Getenv("OPENCODE_SERVER_URL"); runtimeURL != "" {
+		runtime, err := sessionrunner.NewOpenCodeRuntime(sessionrunner.OpenCodeConfig{
+			ServerURL: runtimeURL,
+			Client:    &http.Client{Timeout: 15 * time.Second},
+		})
+		if err != nil {
+			return fmt.Errorf("open-code runtime for session abort: %w", err)
+		}
+		taskService.WithSessionAborter(runtime)
+	}
+
+	// The Owner merge endpoint needs a GitHub credential, resolved through
+	// the secrets abstraction (env-var locally, secrets-manager in
+	// production); without it the route answers merge_unavailable.
+	var githubClient tasks.GitMergeClient
+	if token, err := (secrets.Env{}).Resolve(context.Background(), "GITHUB_TOKEN"); err == nil {
+		githubClient = &mergeGitHubAdapter{inner: &prrunner.HTTPGitHub{
+			APIURL: os.Getenv("GITHUB_API_URL"), Token: token,
+			Client: &http.Client{Timeout: 20 * time.Second},
+		}}
+	}
+
 	server := &http.Server{
 		Addr: address,
 		Handler: httpapi.NewRouter(httpapi.Dependencies{
-			DB: db, Auth: auth.NewService(db), Directory: directory.NewService(db), Tasks: tasks.NewService(db),
+			DB: db, Auth: auth.NewService(db), Directory: directory.NewService(db), Tasks: taskService,
 			Events:          events.NewService(db),
+			Repositories:    repositories.NewService(db),
+			Providers:       providers.NewService(db),
 			ReferenceImages: referenceImageStore,
 			FolderBridge:    folderBridge,
+			GitHub:          githubClient,
 			SecureCookies:   secureCookies, WebOrigin: webOrigin, DevAuthBypass: devAuthBypass,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -189,4 +222,35 @@ func openDatabase(databaseURL string) (*sql.DB, error) {
 		return nil, errors.New("database is unavailable; verify DATABASE_URL and PostgreSQL health")
 	}
 	return db, nil
+}
+
+// mergeGitHubAdapter narrows the full GitHub client to the merge surface the
+// task service declares, translating its API error codes into the service's
+// refusal/availability contract.
+type mergeGitHubAdapter struct {
+	inner prrunner.GitHubClient
+}
+
+func (a *mergeGitHubAdapter) MergePR(ctx context.Context, owner, repo string, number int, headSHA string) (*tasks.MergedPullRequest, error) {
+	pr, err := a.inner.MergePR(ctx, owner, repo, number, prrunner.MergePRInput{HeadSHA: headSHA})
+	if err != nil {
+		return nil, translateMergeError(err)
+	}
+	return &tasks.MergedPullRequest{State: pr.State, HeadSHA: pr.HeadSHA, MergedAt: pr.MergedAt}, nil
+}
+
+func (a *mergeGitHubAdapter) GetPR(ctx context.Context, owner, repo string, number int) (*tasks.MergedPullRequest, error) {
+	pr, err := a.inner.GetPR(ctx, owner, repo, number)
+	if err != nil {
+		return nil, err
+	}
+	return &tasks.MergedPullRequest{State: pr.State, HeadSHA: pr.HeadSHA, MergedAt: pr.MergedAt}, nil
+}
+
+func translateMergeError(err error) error {
+	var apiErr *prrunner.APIError
+	if errors.As(err, &apiErr) && apiErr.Code == prrunner.ErrValidation {
+		return fmt.Errorf("%w: %s", tasks.MergeRefusal, apiErr.Message)
+	}
+	return err
 }

@@ -102,13 +102,52 @@ func validReferenceImageKey(key string) bool {
 	if !strings.HasPrefix(key, prefix) {
 		return false
 	}
-	id := strings.TrimPrefix(key, prefix)
+	return isUUID(strings.TrimPrefix(key, prefix))
+}
+
+// validArtifactKey matches the artifacts table invariant: storage_key is
+// exactly 'artifacts/' followed by the artifact row's UUID.
+func validArtifactKey(key string) bool {
+	const prefix = "artifacts/"
+	return strings.HasPrefix(key, prefix) && isUUID(strings.TrimPrefix(key, prefix))
+}
+
+func isUUID(id string) bool {
 	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' {
 		return false
 	}
 	compact := strings.ReplaceAll(id, "-", "")
 	decoded, err := hex.DecodeString(compact)
 	return err == nil && len(decoded) == 16
+}
+
+// PutArtifact writes a private evidence object (check log tail or preview
+// screenshot) under the artifacts/ key namespace used by the artifacts table.
+// Content types are limited to text/plain logs and PNG screenshots at 16 MiB.
+func (s *S3Store) PutArtifact(ctx context.Context, key, contentType string, data []byte) error {
+	if s == nil || s.client == nil || !validArtifactKey(key) || len(data) == 0 || len(data) > 16<<20 ||
+		(contentType != "text/plain" && contentType != "image/png") {
+		return errors.New("invalid artifact write")
+	}
+	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
+		ContentType: contentType,
+	})
+	if err != nil {
+		return errors.New("artifact write failed")
+	}
+	return nil
+}
+
+// GetArtifact reads back a private evidence object by its storage key.
+func (s *S3Store) GetArtifact(ctx context.Context, key string) (io.ReadCloser, error) {
+	if s == nil || s.client == nil || !validArtifactKey(key) {
+		return nil, errors.New("invalid artifact read")
+	}
+	object, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("get artifact: %w", err)
+	}
+	return object, nil
 }
 
 var _ interface {

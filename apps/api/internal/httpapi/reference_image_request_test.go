@@ -58,7 +58,7 @@ func newMultipartTaskRequest(t *testing.T, imageBytes []byte, filename string, a
 	}
 	taskJSON, err := json.Marshal(createTaskRequest{
 		AssigneeEmployeeID: assigneeEmployeeID,
-		Title: "Make the task from a brief", Description: "Keep the full instruction", TaskType: "feature", Priority: "NORMAL",
+		Title:              "Make the task from a brief", Description: "Keep the full instruction", TaskType: "feature", Priority: "NORMAL",
 	})
 	if err != nil {
 		return nil, err

@@ -85,7 +85,8 @@ type referenceImageHash struct {
 }
 
 type Service struct {
-	db *sql.DB
+	db      *sql.DB
+	aborter SessionAborter
 }
 
 func NewService(db *sql.DB) *Service {

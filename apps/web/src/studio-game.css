@@ -209,6 +209,14 @@
 .game-ui .primary-button:hover:not(:disabled) { color: #442b0e; background: #f8cb61; }
 .game-ui .secondary-button { min-height: 44px; border: 1px solid var(--game-cyan-edge); border-radius: 4px; color: #20576c; background: #e3f2f5; box-shadow: inset 1px 1px #fff, inset -1px -1px #abcbd2; font-size: 12px; }
 .game-ui .secondary-button:hover:not(:disabled) { background: #d1e9ef; }
+.game-ui .danger-button { min-height: 44px; border: 1px solid #9a3412; border-radius: 4px; padding: 8px 12px; color: #7c2d12; background: #fde8de; box-shadow: inset 1px 1px #fff, inset -1px -1px #f3c2ab; font-size: 12px; font-weight: 700; }
+.game-ui .danger-button:hover:not(:disabled) { background: #fbd5c2; }
+.game-ui .danger-button:disabled { border-color: #b8c4c9; color: var(--studio-muted); background: #e8edee; box-shadow: none; }
+.game-ui .providers-panel { max-width: 860px; }
+.game-ui .provider-card { border: 1px solid var(--studio-outline); border-radius: 4px; box-shadow: none; }
+.game-ui .provider-card input[type='text'], .game-ui .provider-card input[type='url'] { border: 1px solid #a5b5bc; border-radius: 3px; }
+.game-ui .provider-adapter-badge { border: 1px solid #98a6ae; border-radius: 3px; color: #40505a; background: #e5eaec; }
+.game-ui .provider-adapter-badge[data-implemented='true'] { border-color: var(--game-amber-edge); color: #593d0f; background: var(--game-amber); }
 .game-ui .field input, .game-ui .field textarea, .game-ui .field select { border: 1px solid #a5b5bc; border-radius: 3px; color: var(--studio-ink); background: #fff; font-size: 13px; }
 .game-ui .field > span { color: var(--studio-ink); font-size: 12px; }
 .game-ui .task-options { border: 1px solid var(--studio-line); border-radius: 3px; background: #eef3f1; }
@@ -219,6 +227,9 @@
 .game-ui .workstation-evidence { border: 1px solid #c3cdd1; border-radius: 3px; background: #fff; }
 .game-ui .portrait-frame, .game-ui .workstation-identity .portrait-frame { width: 96px; height: 124px; border: 1px solid #94a8ae; border-radius: 4px; background: #dcebf0; box-shadow: inset 1px 1px #fff; }
 .game-ui .section-kicker { color: var(--studio-lilac-dark); font-size: 10px; }
+.game-ui .pr-review .primary-button { width: 100%; margin-top: 8px; }
+.game-ui .pr-review-meta code { word-break: break-all; }
+
 .game-ui .runtime-boundary { border: 1px solid #c3cdd1; border-radius: 3px; padding: 12px; color: var(--studio-muted); background: #eff3f3; font-size: 11px; }
 .game-ui .team-grid { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
 .game-ui .team-card { border: 1px solid var(--studio-outline); border-radius: 4px; box-shadow: none; }

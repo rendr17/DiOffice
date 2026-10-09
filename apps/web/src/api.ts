@@ -42,11 +42,53 @@ export interface Task {
   acceptanceCriteria: string[];
   requiredChecks: string[];
   referenceImages?: TaskReferenceImage[];
+  manifestDigest?: string;
   taskType: string;
   priority: string;
   status: string;
   version: number;
   createdAt: string;
+}
+
+export interface Repository {
+  id: string;
+  projectId: string;
+  provider: string;
+  owner: string;
+  name: string;
+  defaultBranch: string;
+}
+
+export interface ProviderInfo {
+  key: string;
+  displayName: string;
+  kind: string;
+  adapterStatus: string;
+  needsBaseUrl: boolean;
+  needsCredential: boolean;
+  configured: boolean;
+  enabled: boolean;
+  label: string;
+  baseUrl?: string;
+  credentialEnv?: string;
+}
+
+export interface SaveProviderInput {
+  label: string;
+  baseUrl: string;
+  credentialEnv: string;
+  enabled: boolean;
+}
+
+export interface PullRequestInfo {
+  id: string;
+  number: number;
+  url: string;
+  branchName: string;
+  headSha: string;
+  baseSha: string;
+  state: string;
+  mergedAt: string | null;
 }
 
 export interface CreateTaskInput {
@@ -87,7 +129,11 @@ export interface EventPage {
 }
 
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly code: string) {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    readonly missing?: string[],
+  ) {
     super(code);
     this.name = 'ApiError';
   }
@@ -184,6 +230,38 @@ export class ApiClient {
     return response.items;
   }
 
+  async listProviders(): Promise<ProviderInfo[]> {
+    return this.request<ProviderInfo[]>('/api/v1/providers');
+  }
+
+  saveProvider(providerKey: string, input: SaveProviderInput): Promise<ProviderInfo> {
+    return this.request<ProviderInfo>(
+      `/api/v1/providers/${encodeURIComponent(providerKey)}`,
+      { method: 'PUT', body: JSON.stringify(input), csrf: true },
+    );
+  }
+
+  async getProjectRepository(projectID: string): Promise<Repository | null> {
+    try {
+      return await this.request<Repository>(
+        `/api/v1/projects/${encodeURIComponent(projectID)}/repository`,
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'repository_not_found') return null;
+      throw error;
+    }
+  }
+
+  saveProjectRepository(
+    projectID: string,
+    input: { owner: string; name: string; defaultBranch: string },
+  ): Promise<Repository> {
+    return this.request<Repository>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/repository`,
+      { method: 'PUT', body: JSON.stringify(input), csrf: true },
+    );
+  }
+
   async listTasks(projectID: string): Promise<Task[]> {
     const response = await this.request<{ items: Task[] }>(
       `/api/v1/projects/${encodeURIComponent(projectID)}/tasks`,
@@ -235,6 +313,100 @@ export class ApiClient {
     );
   }
 
+  markTaskReady(projectID: string, taskID: string, expectedVersion: number, idempotencyKey: string, manifestDigest?: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/ready`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(manifestDigest ? { expectedVersion, manifestDigest } : { expectedVersion }),
+        csrf: true,
+      },
+    );
+  }
+
+  startTask(projectID: string, taskID: string, expectedVersion: number, idempotencyKey: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/start`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expectedVersion }),
+        csrf: true,
+      },
+    );
+  }
+
+  retryTask(projectID: string, taskID: string, expectedVersion: number, idempotencyKey: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/retry`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expectedVersion }),
+        csrf: true,
+      },
+    );
+  }
+
+  cancelTask(projectID: string, taskID: string, expectedVersion: number, idempotencyKey: string, reason?: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/cancel`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(reason?.trim() ? { expectedVersion, reason } : { expectedVersion }),
+        csrf: true,
+      },
+    );
+  }
+
+  getTaskPullRequest(projectID: string, taskID: string): Promise<PullRequestInfo> {
+    return this.request<PullRequestInfo>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/pull-request`,
+    );
+  }
+
+  approveTask(projectID: string, taskID: string, input: { expectedVersion: number; headSha: string; reason?: string }, idempotencyKey: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/approve`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(input.reason?.trim()
+          ? { expectedVersion: input.expectedVersion, headSha: input.headSha, reason: input.reason }
+          : { expectedVersion: input.expectedVersion, headSha: input.headSha }),
+        csrf: true,
+      },
+    );
+  }
+
+  requestTaskChanges(projectID: string, taskID: string, input: { expectedVersion: number; reason: string }, idempotencyKey: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/request-changes`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify({ expectedVersion: input.expectedVersion, reason: input.reason }),
+        csrf: true,
+      },
+    );
+  }
+
+  mergeTaskPullRequest(projectID: string, taskID: string, input: { expectedVersion: number; reason?: string }, idempotencyKey: string): Promise<Task> {
+    return this.request<Task>(
+      `/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/merge`,
+      {
+        method: 'POST',
+        headers: { 'Idempotency-Key': idempotencyKey },
+        body: JSON.stringify(input.reason?.trim()
+          ? { expectedVersion: input.expectedVersion, reason: input.reason }
+          : { expectedVersion: input.expectedVersion }),
+        csrf: true,
+      },
+    );
+  }
+
   referenceImageURL(projectID: string, taskID: string, imageID: string): string {
     return `${this.baseURL}/api/v1/projects/${encodeURIComponent(projectID)}/tasks/${encodeURIComponent(taskID)}/reference-images/${encodeURIComponent(imageID)}`;
   }
@@ -278,7 +450,11 @@ export class ApiClient {
         typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string'
           ? payload.error
           : 'request_failed';
-      throw new ApiError(response.status, code);
+      const missing =
+        typeof payload === 'object' && payload !== null && 'missing' in payload && Array.isArray(payload.missing)
+          ? payload.missing.filter((field): field is string => typeof field === 'string')
+          : undefined;
+      throw new ApiError(response.status, code, missing);
     }
     return payload as T;
   }

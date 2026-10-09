@@ -101,7 +101,9 @@ func TestMigrationCommandIsIdempotentAndEnforcesTenantScope(t *testing.T) {
 	tables := []string{
 		"organizations", "users", "user_sessions", "employees", "employee_skills",
 		"employee_permissions", "projects", "repositories", "tasks", "agent_events",
-		"event_outbox", "idempotency_keys", "audit_records", "goose_db_version",
+		"event_outbox", "idempotency_keys", "audit_records", "workspaces",
+		"execution_attempts", "agent_sessions", "approvals", "pull_requests",
+		"artifacts", "goose_db_version",
 	}
 	for _, table := range tables {
 		var exists bool
@@ -189,6 +191,155 @@ func TestMigrationCommandIsIdempotentAndEnforcesTenantScope(t *testing.T) {
 		organizationA, projectA, taskA, employeeA, actor)
 	if err == nil {
 		t.Fatal("duplicate project event sequence was accepted")
+	}
+
+	workspaceA := insertID(t, ctx, scopedDB, `
+		INSERT INTO workspaces (
+			organization_id, project_id, task_id, branch_name, worktree_ref,
+			worker_profile, state
+		) VALUES ($1, $2, $3, 'task/demo', 'worktree-ref-1', 'node-22-pnpm-10-playwright', 'IN_USE')
+		RETURNING id::text`, organizationA, projectA, taskA)
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO workspaces (
+			organization_id, project_id, task_id, branch_name, worktree_ref,
+			worker_profile, state
+		) VALUES ($1, $2, $3, 'task/demo-2', 'worktree-ref-2', 'node-22-pnpm-10-playwright', 'READY')`,
+		organizationA, projectA, taskA)
+	if err == nil {
+		t.Fatal("second writable workspace for the same task was accepted")
+	}
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO execution_attempts (
+			organization_id, project_id, task_id, employee_id, attempt_number,
+			state, runtime_type
+		) VALUES ($1, $2, $3, $4, 1, 'RUNNING', 'opencode')`,
+		organizationA, projectB, taskA, employeeA)
+	if err == nil {
+		t.Fatal("attempt was allowed on a different project than its task")
+	}
+
+	attemptA := insertID(t, ctx, scopedDB, `
+		INSERT INTO execution_attempts (
+			organization_id, project_id, task_id, employee_id, attempt_number,
+			state, runtime_type, started_at
+		) VALUES ($1, $2, $3, $4, 1, 'RUNNING', 'opencode', now())
+		RETURNING id::text`, organizationA, projectA, taskA, employeeA)
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO execution_attempts (
+			organization_id, project_id, task_id, employee_id, attempt_number,
+			state, runtime_type
+		) VALUES ($1, $2, $3, $4, 2, 'CREATED', 'opencode')`,
+		organizationA, projectA, taskA, employeeA)
+	if err == nil {
+		t.Fatal("second active attempt for the same task was accepted")
+	}
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO execution_attempts (
+			organization_id, project_id, task_id, employee_id, attempt_number,
+			state, runtime_type
+		) VALUES ($1, $2, $3, $4, 2, 'STUCK', 'opencode')`,
+		organizationA, projectA, taskA, employeeA)
+	if err == nil {
+		t.Fatal("non-canonical attempt state was accepted")
+	}
+
+	sessionA := insertID(t, ctx, scopedDB, `
+		INSERT INTO agent_sessions (
+			organization_id, project_id, task_id, attempt_id, employee_id,
+			workspace_id, runtime_type, status, started_at
+		) VALUES ($1, $2, $3, $4, $5, $6, 'opencode', 'RUNNING', now())
+		RETURNING id::text`, organizationA, projectA, taskA, attemptA, employeeA, workspaceA)
+
+	approvalA := insertID(t, ctx, scopedDB, `
+		INSERT INTO approvals (
+			organization_id, project_id, task_id, attempt_id, requested_by_employee_id,
+			action_type, action_digest, policy_version, expires_at
+		) VALUES ($1, $2, $3, $4, $5, 'merge', $6, 'v1', now() + interval '1 hour')
+		RETURNING id::text`,
+		organizationA, projectA, taskA, attemptA, employeeA,
+		strings.Repeat("a", 64))
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO approvals (
+			organization_id, project_id, task_id, attempt_id,
+			action_type, action_digest, policy_version, expires_at
+		) VALUES ($1, $2, $3, $4, 'check_override', $5, 'v1', now() + interval '1 hour')`,
+		organizationA, projectA, taskA, attemptA, strings.Repeat("b", 64))
+	if err == nil {
+		t.Fatal("second pending approval for the same task was accepted")
+	}
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO approvals (
+			organization_id, project_id, task_id, attempt_id,
+			action_type, action_digest, policy_version, expires_at
+		) VALUES ($1, $2, $3, $4, 'merge', 'not-a-digest', 'v1', now() + interval '1 hour')`,
+		organizationA, projectA, taskA, attemptA)
+	if err == nil {
+		t.Fatal("approval with a non-SHA-256 action digest was accepted")
+	}
+
+	repositoryA := insertID(t, ctx, scopedDB, `
+		INSERT INTO repositories (
+			organization_id, project_id, provider, owner, repo_name, default_branch
+		) VALUES ($1, $2, 'github', 'octo', 'demo', 'main')
+		RETURNING id::text`, organizationA, projectA)
+
+	_, err = scopedDB.ExecContext(ctx, `
+		INSERT INTO pull_requests (
+			organization_id, project_id, task_id, repository_id, provider,
+			external_pr_id, number, url, branch_name, head_sha, base_sha, state
+		) VALUES ($1, $2, $3, $4, 'github', 'pr-1', 1, 'https://example.invalid/pr/1',
+			'task/demo', 'zzzz', $5, 'OPEN')`,
+		organizationA, projectA, taskA, repositoryA, strings.Repeat("c", 64))
+	if err == nil {
+		t.Fatal("pull request with a non-SHA head was accepted")
+	}
+
+	pullRequestA := insertID(t, ctx, scopedDB, `
+		INSERT INTO pull_requests (
+			organization_id, project_id, task_id, repository_id, provider,
+			external_pr_id, number, url, branch_name, head_sha, base_sha, state
+		) VALUES ($1, $2, $3, $4, 'github', 'pr-1', 1, 'https://example.invalid/pr/1',
+			'task/demo', $5, $5, 'OPEN')
+		RETURNING id::text`, organizationA, projectA, taskA, repositoryA, strings.Repeat("c", 64))
+
+	_, err = scopedDB.ExecContext(ctx, `
+		UPDATE tasks SET pull_request_id = $1 WHERE organization_id = $2 AND project_id = $3 AND id = $4`,
+		pullRequestA, organizationA, projectA, taskA)
+	if err != nil {
+		t.Fatalf("task pull request link was rejected: %v", err)
+	}
+
+	artifactID := insertID(t, ctx, scopedDB, `
+		INSERT INTO artifacts (
+			id, organization_id, project_id, task_id, attempt_id, session_id, kind,
+			storage_key, mime_type, size_bytes, sha256
+		) VALUES (
+			'0f8fad5b-d9cb-469f-a165-70867728950e', $1, $2, $3, $4, $5, 'screenshot',
+			'artifacts/0f8fad5b-d9cb-469f-a165-70867728950e', 'image/png', 128, $6
+		)
+		RETURNING id::text`,
+		organizationA, projectA, taskA, attemptA, sessionA, strings.Repeat("d", 64))
+	var storageKey string
+	if err := scopedDB.QueryRowContext(ctx, `
+		SELECT storage_key FROM artifacts WHERE organization_id = $1 AND id = $2`,
+		organizationA, artifactID).Scan(&storageKey); err != nil {
+		t.Fatalf("read artifact storage key: %v", err)
+	}
+	if storageKey != "artifacts/"+artifactID {
+		t.Fatalf("artifact storage key %q did not derive from its id", storageKey)
+	}
+
+	_, err = scopedDB.ExecContext(ctx, `
+		UPDATE agent_events SET attempt_id = $1
+		WHERE event_id = $2`, approvalA, eventID)
+	if err == nil {
+		t.Fatal("agent event accepted a non-attempt UUID as attempt_id")
 	}
 }
 

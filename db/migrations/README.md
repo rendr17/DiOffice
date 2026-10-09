@@ -1,5 +1,5 @@
 # Database migrations
 
-Versioned PostgreSQL migrations in this directory implement the initial identity/project and task/event/outbox persistence foundation. The broader model in `docs/DATABASE_SCHEMA.md` remains logical for runtime attempts, workspaces, approvals, pull requests, and artifacts; those tables are not yet implemented.
+Versioned PostgreSQL migrations in this directory implement the identity/project foundation, the task/event/outbox store, the execution-layer schema (workspaces, execution attempts, agent sessions, approvals, pull requests, artifacts, checks verification, PR publication tracking), and the runtime-provider registry (`provider_configs`). Their canonical states and invariants follow `docs/STATE_MACHINES.md`. Remaining logical-only parts of `docs/DATABASE_SCHEMA.md` (for example `task_comments`) still need versioned migrations before those features ship.
 
 The API migration runner is `apps/api/cmd/migrate`. From `apps/api`, set `DATABASE_URL` to a non-production database and run `go run ./cmd/migrate`. `MIGRATIONS_DIR` overrides the default `../../db/migrations` path. The API does not apply migrations automatically at startup. Run `go test ./...`; set `MIGRATION_TEST_DATABASE_URL` to a disposable PostgreSQL database to exercise migrations and tenant constraints. Never run migration tests against production data.

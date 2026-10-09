@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ApiClient, ApiError, type Employee, type FolderEditor, type Project, type SessionUser, type Task } from './api';
+import { ApiClient, ApiError, type Employee, type FolderEditor, type Project, type ProviderInfo, type PullRequestInfo, type Repository, type SaveProviderInput, type SessionUser, type Task } from './api';
 import { commandToTaskFields } from './task-command';
-import { AttachmentPreview, EmployeeSnapshotWarning, EventConnectionBadge, InspectorDialog, OfficeScene, PixelIcon, PixelSprite, ProjectFolderActions, SaveDraftToBacklogButton, StateBadge, WorkstationContent, type ProjectFolderAvailability } from './office-ui';
+import { AttachmentPreview, CancelTaskButton, EmployeeSnapshotWarning, EventConnectionBadge, InspectorDialog, ManifestDigestField, MarkReadyButton, OfficeScene, PixelIcon, PixelSprite, ProjectFolderActions, ProvidersPanel, PullRequestReview, RepositoryConnection, RetryTaskButton, SaveDraftToBacklogButton, StartTaskButton, StateBadge, WorkstationContent, type ProjectFolderAvailability } from './office-ui';
 import { StudioHUD, type StudioPane } from './studio-hud';
 import { getStudioArea, initialStudioAvatar, STUDIO_EMPLOYEE_X, STUDIO_WORLD_WIDTH } from './studio-navigation';
 import { useProjectActivity } from './use-project-activity';
@@ -22,8 +22,8 @@ const maxReferenceImageBytes = 8 * 1024 * 1024;
 const maxReferenceImageTotalBytes = maxReferenceImageCount * maxReferenceImageBytes;
 
 async function fetchDirectory() {
-  const [projects, employees] = await Promise.all([api.listProjects(), api.listEmployees()]);
-  return { projects, employees };
+  const [projects, employees, providers] = await Promise.all([api.listProjects(), api.listEmployees(), api.listProviders()]);
+  return { projects, employees, providers };
 }
 
 function newIdempotencyKey() {
@@ -61,7 +61,15 @@ function messageFor(error: unknown) {
     case 'stale_task_version':
       return 'This task changed in another window. Refresh the task board before trying again.';
     case 'invalid_state_transition':
-      return 'Only a DRAFT task can be saved to the backlog.';
+      return 'This task cannot move to the requested state. Refresh the board and check its status.';
+    case 'task_incomplete':
+      return '';
+    case 'active_attempt_exists':
+      return 'Employee ini masih memiliki attempt aktif. Tunggu selesai atau batalkan task yang berjalan.';
+    case 'invalid_repository':
+      return 'Detail repository tidak valid. Periksa owner, nama repo, dan default branch.';
+    case 'repository_not_found':
+      return 'Repository belum terhubung ke project ini.';
     case 'idempotency_key_conflict':
       return 'This task request changed during a retry. Edit the task and submit again.';
     case 'folder_not_configured':
@@ -75,6 +83,23 @@ function messageFor(error: unknown) {
         ? 'The server could not complete this request. Try again shortly.'
         : 'The request could not be completed. Check the details and retry.';
   }
+}
+
+const missingRequirementLabels: Record<string, string> = {
+  description: 'deskripsi task',
+  acceptanceCriteria: 'acceptance criteria',
+  manifestDigest: 'digest manifest .dioffice/execution.json',
+  repository: 'repository GitHub terhubung',
+};
+
+function describeTaskCommandError(error: unknown) {
+  if (error instanceof ApiError && error.code === 'task_incomplete') {
+    const missing = (error.missing ?? []).map((field) => missingRequirementLabels[field] ?? field);
+    return missing.length > 0
+      ? `Task belum READY — lengkapi dulu: ${missing.join(', ')}.`
+      : 'Task belum memenuhi syarat READY.';
+  }
+  return messageFor(error);
 }
 
 function formatDate(value: string) {
@@ -102,6 +127,9 @@ export function App() {
   const [logoutPending, setLogoutPending] = useState(false);
   const [taskPending, setTaskPending] = useState(false);
   const [taskCommandPending, setTaskCommandPending] = useState(false);
+  const [repository, setRepository] = useState<Repository | null>(null);
+  const [repositoryPending, setRepositoryPending] = useState(false);
+  const [manifestDigestInput, setManifestDigestInput] = useState('');
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceLoadError, setWorkspaceLoadError] = useState(false);
   const [employeeSnapshotError, setEmployeeSnapshotError] = useState('');
@@ -116,15 +144,20 @@ export function App() {
   const [taskFilter, setTaskFilter] = useState('ALL');
   const [inspectedEmployee, setInspectedEmployee] = useState<Employee | null>(null);
   const [inspectedTask, setInspectedTask] = useState<Task | null>(null);
+  const [inspectedTaskPR, setInspectedTaskPR] = useState<PullRequestInfo | null>(null);
+  const [prLoading, setPRLoading] = useState(false);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [providerPending, setProviderPending] = useState<string | null>(null);
   const idempotencyKey = useRef(newIdempotencyKey());
-  const backlogCommandKeys = useRef(new Map<string, string>());
+  const taskCommandKeys = useRef(new Map<string, string>());
   const referenceImagesInput = useRef<HTMLInputElement>(null);
   const instructionInput = useRef<HTMLTextAreaElement>(null);
   const taskSnapshotScope = useRef('');
 
-  const applyDirectory = (directory: { projects: Project[]; employees: Employee[] }) => {
+  const applyDirectory = (directory: { projects: Project[]; employees: Employee[]; providers?: ProviderInfo[] }) => {
     setProjects(directory.projects);
     setEmployees(directory.employees);
+    if (directory.providers) setProviders(directory.providers);
     setEmployeeSnapshotError('');
     setSelectedProjectId((current) =>
       directory.projects.some((project) => project.id === current)
@@ -203,6 +236,20 @@ export function App() {
 
   useEffect(() => {
     if (!user || !selectedProjectId) {
+      setRepository(null);
+      return;
+    }
+    let active = true;
+    void api.getProjectRepository(selectedProjectId).then((connected) => {
+      if (active) setRepository(connected);
+    }).catch(() => {
+      if (active) setRepository(null);
+    });
+    return () => { active = false; };
+  }, [user?.id, selectedProjectId]);
+
+  useEffect(() => {
+    if (!user || !selectedProjectId) {
       setProjectFolderStatus('unavailable');
       return;
     }
@@ -215,6 +262,25 @@ export function App() {
     });
     return () => { active = false; };
   }, [user?.id, selectedProjectId, projectFolderRevision]);
+
+  useEffect(() => {
+    setInspectedTaskPR(null);
+    const task = inspectedTask;
+    if (!task || (task.status !== 'IN_REVIEW' && task.status !== 'DONE')) {
+      setPRLoading(false);
+      return;
+    }
+    let active = true;
+    setPRLoading(true);
+    void api.getTaskPullRequest(task.projectId, task.id).then((pr) => {
+      if (active) setInspectedTaskPR(pr);
+    }).catch(() => {
+      if (active) setInspectedTaskPR(null);
+    }).finally(() => {
+      if (active) setPRLoading(false);
+    });
+    return () => { active = false; };
+  }, [inspectedTask?.id, inspectedTask?.status]);
 
   useEffect(() => {
     if (!user || employeeRevision === 0) return;
@@ -285,6 +351,8 @@ export function App() {
     setTaskLoadError(false);
     setInspectedEmployee(null);
     setInspectedTask(null);
+    setRepository(null);
+    setManifestDigestInput('');
     setView('office');
     setTaskForm((current) => ({ ...current, instruction: '', referenceImages: [] }));
     if (referenceImagesInput.current) referenceImagesInput.current.value = '';
@@ -374,30 +442,221 @@ export function App() {
     }
   };
 
+  const openTaskInspector = (task: Task) => {
+    setInspectedTask(task);
+    setManifestDigestInput(task.manifestDigest ?? '');
+  };
+
+  const commandKeyFor = (task: Task, action: string) => {
+    const commandID = `${task.id}:${task.version}:${action}`;
+    let commandKey = taskCommandKeys.current.get(commandID);
+    if (!commandKey) {
+      commandKey = newIdempotencyKey();
+      taskCommandKeys.current.set(commandID, commandKey);
+    }
+    return commandKey;
+  };
+
+  const refreshTasksAfterCommandError = (commandError: unknown) => {
+    if (commandError instanceof ApiError && (commandError.code === 'stale_task_version' || commandError.code === 'invalid_state_transition' || commandError.code === 'active_attempt_exists')) {
+      setTaskRevision((revision) => revision + 1);
+    }
+  };
+
   const handleSaveTaskToBacklog = async () => {
     const task = inspectedTask;
     if (!task || task.status !== 'DRAFT') return;
-    const commandID = `${task.id}:${task.version}:BACKLOG`;
-    let commandKey = backlogCommandKeys.current.get(commandID);
-    if (!commandKey) {
-      commandKey = newIdempotencyKey();
-      backlogCommandKeys.current.set(commandID, commandKey);
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedTask = await api.saveTaskToBacklog(task.projectId, task.id, task.version, commandKeyFor(task, 'BACKLOG'));
+      setInspectedTask(null);
+      setNotice(`“${updatedTask.title}” saved to BACKLOG. No agent has started.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleMarkTaskReady = async () => {
+    const task = inspectedTask;
+    if (!task || (task.status !== 'DRAFT' && task.status !== 'BACKLOG')) return;
+    const digest = manifestDigestInput.trim();
+    if (digest && !/^[0-9a-f]{64}$/u.test(digest)) {
+      setError('Digest manifest harus berupa 64 karakter heksadesimal (SHA-256).');
+      return;
     }
     setTaskCommandPending(true);
     setError('');
     setNotice('');
     try {
-      const updatedTask = await api.saveTaskToBacklog(task.projectId, task.id, task.version, commandKey);
+      const updatedTask = await api.markTaskReady(task.projectId, task.id, task.version, commandKeyFor(task, 'READY'), digest || undefined);
       setInspectedTask(null);
-      setNotice(`“${updatedTask.title}” saved to BACKLOG. No agent has started.`);
+      setNotice(`“${updatedTask.title}” is READY. Start masih aksi Owner eksplisit.`);
       setTaskRevision((revision) => revision + 1);
     } catch (commandError) {
-      setError(messageFor(commandError));
-      if (commandError instanceof ApiError && (commandError.code === 'stale_task_version' || commandError.code === 'invalid_state_transition')) {
-        setTaskRevision((revision) => revision + 1);
-      }
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
     } finally {
       setTaskCommandPending(false);
+    }
+  };
+
+  const handleStartTask = async () => {
+    const task = inspectedTask;
+    if (!task || task.status !== 'READY') return;
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedTask = await api.startTask(task.projectId, task.id, task.version, commandKeyFor(task, 'START'));
+      setInspectedTask(null);
+      setNotice(`“${updatedTask.title}” entered PROVISIONING. Provisioner akan menyiapkan worktree lalu runtime.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleRetryTask = async () => {
+    const task = inspectedTask;
+    if (!task || (task.status !== 'BLOCKED' && task.status !== 'FAILED')) return;
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedTask = await api.retryTask(task.projectId, task.id, task.version, commandKeyFor(task, 'RETRY'));
+      setInspectedTask(null);
+      setNotice(`“${updatedTask.title}” kembali ke READY. Attempt lama dibatalkan; Start ulang tetap aksi Owner.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleCancelTask = async () => {
+    const task = inspectedTask;
+    if (!task) return;
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedTask = await api.cancelTask(task.projectId, task.id, task.version, commandKeyFor(task, 'CANCEL'));
+      setInspectedTask(null);
+      setNotice(`“${updatedTask.title}” dibatalkan. Sesi agent dan workspace ditutup.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleApproveTask = async (headSha: string) => {
+    const task = inspectedTask;
+    if (!task || task.status !== 'IN_REVIEW') return;
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedTask = await api.approveTask(task.projectId, task.id,
+        { expectedVersion: task.version, headSha }, commandKeyFor(task, 'APPROVE'));
+      setInspectedTask(null);
+      setNotice(`“${updatedTask.title}” DONE — SHA ${headSha.slice(0, 8)}… disetujui. Merge PR tetap aksi terpisah di GitHub.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleRequestChanges = async (reason: string) => {
+    const task = inspectedTask;
+    if (!task || task.status !== 'IN_REVIEW') return;
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const updatedTask = await api.requestTaskChanges(task.projectId, task.id,
+        { expectedVersion: task.version, reason }, commandKeyFor(task, 'REQUEST_CHANGES'));
+      setInspectedTask(null);
+      setNotice(`“${updatedTask.title}” kembali IN_PROGRESS — Deni merevisi worktree dan PR yang sama.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleMergeTask = async () => {
+    const task = inspectedTask;
+    if (!task || task.status !== 'DONE') return;
+    setTaskCommandPending(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.mergeTaskPullRequest(task.projectId, task.id,
+        { expectedVersion: task.version }, commandKeyFor(task, 'MERGE'));
+      const pr = await api.getTaskPullRequest(task.projectId, task.id).catch(() => null);
+      setInspectedTaskPR(pr);
+      setNotice(pr?.state === 'MERGED'
+        ? `PR #${pr.number} tergabung di GitHub — “${task.title}” selesai end-to-end.`
+        : `Perintah merge tercatat untuk “${task.title}”.`);
+      setTaskRevision((revision) => revision + 1);
+    } catch (commandError) {
+      setError(describeTaskCommandError(commandError));
+      refreshTasksAfterCommandError(commandError);
+    } finally {
+      setTaskCommandPending(false);
+    }
+  };
+
+  const handleSaveProvider = async (providerKey: string, input: SaveProviderInput) => {
+    if (providerPending) return;
+    setProviderPending(providerKey);
+    setError('');
+    setNotice('');
+    try {
+      const saved = await api.saveProvider(providerKey, input);
+      setProviders((current) => current.map((item) => item.key === providerKey ? saved : item));
+      setNotice(saved.enabled
+        ? `Provider ${saved.displayName} tersimpan dan aktif.`
+        : `Provider ${saved.displayName} tersimpan (nonaktif).`);
+    } catch (saveError) {
+      setError(messageFor(saveError));
+    } finally {
+      setProviderPending(null);
+    }
+  };
+
+  const handleConnectRepository = async (input: { owner: string; name: string; defaultBranch: string }) => {
+    if (!selectedProjectId || repositoryPending) return;
+    setRepositoryPending(true);
+    setError('');
+    setNotice('');
+    try {
+      const connected = await api.saveProjectRepository(selectedProjectId, input);
+      setRepository(connected);
+      setNotice(`Repository ${connected.owner}/${connected.name} terhubung ke project.`);
+    } catch (connectError) {
+      setError(messageFor(connectError));
+    } finally {
+      setRepositoryPending(false);
     }
   };
 
@@ -571,7 +830,7 @@ export function App() {
             <OfficeScene employee={selectedEmployee} ownerName={user.displayName} loading={workspaceLoading} onInspect={() => selectedEmployee && setInspectedEmployee(selectedEmployee)} onOwnerPositionChange={(x) => setOwnerWorldX(Math.round(x))} />
           </div>
 
-          {view !== 'office' && <InspectorDialog title={view === 'board' ? 'QUEST JOURNAL / TASK BOARD' : view === 'team' ? 'STUDIO TEAM' : 'NEW QUEST / DRAFT'} onClose={() => setView('office')}>
+          {view !== 'office' && <InspectorDialog title={view === 'board' ? 'QUEST JOURNAL / TASK BOARD' : view === 'team' ? 'STUDIO TEAM' : view === 'providers' ? 'RUNTIME PROVIDERS' : 'NEW QUEST / DRAFT'} onClose={() => setView('office')}>
           {view === 'team' ? <section className="team-grid" aria-label="Persisted employees">{workspaceLoading ? <p className="panel-hint">Memuat team…</p> : employees.length === 0 ? <p className="empty-message">Belum ada employee persisten.</p> : employees.map((employee) => <article className="team-card pixel-panel" key={employee.id}><div className="window-bar"><span className="window-label"><PixelIcon name="team" />EMPLOYEE</span><StateBadge status={employee.status} /></div><div className="team-card-body"><div className="portrait-frame"><PixelSprite scale={2} /></div><h2>{employee.name}</h2><p>{employee.role}</p><small>{employee.department}</small><button className="secondary-button" type="button" onClick={() => setInspectedEmployee(employee)}><PixelIcon name="monitor" />Open workstation</button><button className="text-button" type="button" onClick={() => composeForEmployee(employee)}>Beri instruksi <span aria-hidden="true">→</span></button></div></article>)}</section> : <>
           <div className="workspace-grid">
             {view === 'compose' && <section className="panel create-panel pixel-panel" aria-labelledby="create-title">
@@ -678,7 +937,7 @@ export function App() {
                 </div>
                 <span className="task-count">{tasksLoading ? '…' : taskLoadError ? '–' : tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}</span>
               </div>
-              <div className="task-filters" role="group" aria-label="Filter tasks by status">{[['ALL', 'All'], ['DRAFT', 'Draft'], ['BACKLOG', 'Backlog'], ['IN_PROGRESS', 'In progress'], ['IN_REVIEW', 'Review'], ['DONE', 'Done']].map(([status, label]) => <button key={status} type="button" aria-pressed={taskFilter === status} onClick={() => setTaskFilter(status)}>{label}</button>)}</div>
+              <div className="task-filters" role="group" aria-label="Filter tasks by status">{[['ALL', 'All'], ['DRAFT', 'Draft'], ['BACKLOG', 'Backlog'], ['READY', 'Ready'], ['PROVISIONING', 'Provisioning'], ['IN_PROGRESS', 'In progress'], ['WAITING_APPROVAL', 'Approval'], ['BLOCKED', 'Blocked'], ['IN_REVIEW', 'Review'], ['DONE', 'Done'], ['FAILED', 'Failed'], ['CANCELED', 'Canceled']].map(([status, label]) => <button key={status} type="button" aria-pressed={taskFilter === status} onClick={() => setTaskFilter(status)}>{label}</button>)}</div>
               {workspaceLoading ? <div className="empty-state"><span className="loader" aria-hidden="true" /><p>Loading your projects and team…</p></div>
                 : projects.length === 0 ? <div className="empty-state"><span className="empty-icon" aria-hidden="true">⌂</span><h3>No project yet</h3><p>Bootstrap creates the initial project. A project-list empty state is shown if none are active.</p></div>
                   : tasksLoading ? <div className="empty-state"><span className="loader" aria-hidden="true" /><p>Loading persisted tasks…</p></div>
@@ -691,7 +950,7 @@ export function App() {
                               <StateBadge status={task.status} />
                               <span className={`priority-label priority-${task.priority.toLowerCase()}`}>{task.priority}</span>
                             </div>
-                            <h3><button type="button" className="task-title-button" onClick={() => setInspectedTask(task)} aria-label={`Buka task ${task.title}`}>{task.title}<PixelIcon name="arrow" /></button></h3>
+                            <h3><button type="button" className="task-title-button" onClick={() => openTaskInspector(task)} aria-label={`Buka task ${task.title}`}>{task.title}<PixelIcon name="arrow" /></button></h3>
                             <p className="task-description">{task.description}</p>
                             {!!task.referenceImages?.length && (
                               <div className="task-reference-images" aria-label="Task reference images">
@@ -722,6 +981,12 @@ export function App() {
                       </div>}
               <div className="activity-footnote"><EventConnectionBadge status={activity?.status ?? 'loading'} /><span>Snapshot API · maksimal 100 task · event memicu refresh, bukan mengubah status lokal</span>{activity?.status === 'error' && <button className="text-button" type="button" onClick={retryActivity}>Hubungkan ulang Activity</button>}</div>
             </section>}
+
+            {view === 'providers' && <section className="panel providers-panel pixel-panel" aria-labelledby="providers-title">
+              <div className="window-bar"><span className="window-label"><PixelIcon name="monitor" />RUNTIME PROVIDERS</span></div>
+              <h2 id="providers-title" className="visually-hidden">Runtime providers</h2>
+              <ProvidersPanel providers={providers} pendingKey={providerPending} onSave={(key, input) => void handleSaveProvider(key, input)} />
+            </section>}
           </div>
           </>}
           </InspectorDialog>}
@@ -729,7 +994,7 @@ export function App() {
 
           <aside className="studio-quest-tracker" aria-label="Quest tracker">
             <div className="map-window-title"><PixelIcon name="board" /><strong>QUEST TRACKER</strong><span>API SNAPSHOT</span></div>
-            {tasksLoading || workspaceLoading ? <p>Memuat task tersimpan…</p> : taskLoadError || workspaceLoadError ? <p>Snapshot belum dikonfirmasi. Buka Task board untuk retry.</p> : tasks.length === 0 ? <div className="tracker-empty"><PixelIcon name="paper" /><strong>Belum ada quest</strong><p>Beri instruksi untuk membuat draft pertama.</p><button type="button" onClick={() => setView('compose')} disabled={!canCreateTask}>+ Buat draft</button></div> : <ul>{tasks.slice(0, 3).map((task) => <li key={task.id}><button type="button" onClick={() => setInspectedTask(task)}><span className="tracker-quest-mark" aria-hidden="true">!</span><span><strong>{task.title}</strong><StateBadge status={task.status} /></span></button></li>)}</ul>}
+            {tasksLoading || workspaceLoading ? <p>Memuat task tersimpan…</p> : taskLoadError || workspaceLoadError ? <p>Snapshot belum dikonfirmasi. Buka Task board untuk retry.</p> : tasks.length === 0 ? <div className="tracker-empty"><PixelIcon name="paper" /><strong>Belum ada quest</strong><p>Beri instruksi untuk membuat draft pertama.</p><button type="button" onClick={() => setView('compose')} disabled={!canCreateTask}>+ Buat draft</button></div> : <ul>{tasks.slice(0, 3).map((task) => <li key={task.id}><button type="button" onClick={() => openTaskInspector(task)}><span className="tracker-quest-mark" aria-hidden="true">!</span><span><strong>{task.title}</strong><StateBadge status={task.status} /></span></button></li>)}</ul>}
             {tasks.length > 3 && !taskLoadError && <button type="button" className="tracker-all" onClick={() => setView('board')}>Lihat seluruh task yang dimuat ({tasks.length}) <PixelIcon name="arrow" /></button>}
             <p className="tracker-note">Draft ≠ Start · tidak ada kerja simulasi</p>
           </aside>
@@ -749,15 +1014,31 @@ export function App() {
             <div><dt>Task ID</dt><dd><code>{inspectedTask.id}</code></dd></div>
           </dl>
           {!!inspectedTask.referenceImages?.length && <div className="detail-reference-images">{inspectedTask.referenceImages.map((image) => <a key={image.id} href={api.referenceImageURL(inspectedTask.projectId, inspectedTask.id, image.id)} target="_blank" rel="noreferrer"><img crossOrigin="use-credentials" src={api.referenceImageURL(inspectedTask.projectId, inspectedTask.id, image.id)} alt={image.fileName} /><span>{image.fileName}</span></a>)}</div>}
+          <RepositoryConnection repository={repository} pending={repositoryPending} onConnect={(input) => void handleConnectRepository(input)} />
+          <PullRequestReview status={inspectedTask.status} pullRequest={inspectedTaskPR} loading={prLoading} pending={taskCommandPending} onApprove={(headSha) => void handleApproveTask(headSha)} onRequestChanges={(reason) => void handleRequestChanges(reason)} onMerge={() => void handleMergeTask()} />
+          {(inspectedTask.status === 'DRAFT' || inspectedTask.status === 'BACKLOG') && (
+            <ManifestDigestField value={manifestDigestInput} pending={taskCommandPending} onChange={setManifestDigestInput} />
+          )}
           <p className="runtime-boundary"><PixelIcon name="lock" />{inspectedTask.status === 'DRAFT'
             ? 'Draft tersimpan. Simpan ke backlog hanya mengantrekan task; agent tidak berjalan.'
             : inspectedTask.status === 'BACKLOG'
-              ? 'Task tersimpan di BACKLOG. Repository, manifest, dan worker belum terhubung; Start tetap terkunci.'
-              : 'Task detail read-only. Eksekusi agent belum diimplementasikan.'}</p>
+              ? 'Task di BACKLOG. Tandai READY setelah repository terhubung dan digest manifest tercatat; Start tetap aksi Owner.'
+              : inspectedTask.status === 'READY'
+                ? 'READY dikonfirmasi Owner. Start membuat execution attempt baru dan mencatat provisioning.'
+                : inspectedTask.status === 'PROVISIONING'
+                  ? 'Provisioner menyiapkan worktree terisolasi; session runtime menyusul otomatis.'
+                  : inspectedTask.status === 'IN_PROGRESS'
+                    ? 'Deni sedang bekerja di worktree. Aktivitas direkam sebagai durable events; cancel menghentikan sesi.'
+                    : inspectedTask.status === 'BLOCKED' || inspectedTask.status === 'FAILED'
+                      ? 'Eksekusi berhenti dengan reason tercatat di Activity. Retry mengembalikan task ke READY untuk Start ulang eksplisit.'
+                      : 'Task detail read-only. Status diverifikasi dari durable events.'}</p>
           <div className="inspector-actions">
             <button type="button" className="secondary-button" onClick={() => setInspectedTask(null)}>Kembali</button>
             <SaveDraftToBacklogButton status={inspectedTask.status} pending={taskCommandPending} onSave={() => void handleSaveTaskToBacklog()} />
-            <button type="button" className="primary-button" disabled title="Explicit OpenCode execution is not implemented">Start<PixelIcon name="lock" /></button>
+            <MarkReadyButton status={inspectedTask.status} pending={taskCommandPending} onMark={() => void handleMarkTaskReady()} />
+            <StartTaskButton status={inspectedTask.status} pending={taskCommandPending} onStart={() => void handleStartTask()} />
+            <RetryTaskButton status={inspectedTask.status} pending={taskCommandPending} onRetry={() => void handleRetryTask()} />
+            <CancelTaskButton status={inspectedTask.status} pending={taskCommandPending} onCancel={() => void handleCancelTask()} />
           </div>
         </InspectorDialog>
       )}

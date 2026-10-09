@@ -3,7 +3,7 @@ import type { Employee } from './api';
 import type { EventConnection } from './project-events';
 import { EventConnectionBadge, PixelIcon, StateBadge, type PixelIconName } from './office-ui';
 
-export type StudioPane = 'office' | 'board' | 'team' | 'compose';
+export type StudioPane = 'office' | 'board' | 'team' | 'compose' | 'providers';
 
 type HUDProps = {
   ownerName: string;
@@ -22,6 +22,7 @@ const menu: { pane: StudioPane; label: string; icon: PixelIconName; key?: string
   { pane: 'office', label: 'Office', icon: 'office' },
   { pane: 'board', label: 'Task board', icon: 'board', key: 'J' },
   { pane: 'team', label: 'Team', icon: 'team', key: 'T' },
+  { pane: 'providers', label: 'Providers', icon: 'monitor', key: 'P' },
   { pane: 'compose', label: 'Beri instruksi', icon: 'paper', key: 'C' },
 ];
 

@@ -10,6 +10,7 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,26 @@ type createTaskRequest struct {
 
 type saveTaskToBacklogRequest struct {
 	ExpectedVersion int64 `json:"expectedVersion"`
+}
+
+type markTaskReadyRequest struct {
+	ExpectedVersion int64  `json:"expectedVersion"`
+	ManifestDigest  string `json:"manifestDigest"`
+}
+
+type startTaskRequest struct {
+	ExpectedVersion int64 `json:"expectedVersion"`
+}
+
+type controlTaskRequest struct {
+	ExpectedVersion int64  `json:"expectedVersion"`
+	Reason          string `json:"reason"`
+}
+
+type approveTaskRequest struct {
+	ExpectedVersion int64  `json:"expectedVersion"`
+	HeadSHA         string `json:"headSha"`
+	Reason          string `json:"reason"`
 }
 
 func (deps Dependencies) createTask(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +139,260 @@ func (deps Dependencies) saveTaskToBacklog(w http.ResponseWriter, r *http.Reques
 		IdempotencyKey:  r.Header.Get("Idempotency-Key"),
 		ExpectedVersion: body.ExpectedVersion,
 	})
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (deps Dependencies) markTaskReady(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body markTaskReadyRequest
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	task, replayed, err := deps.Tasks.MarkReady(r.Context(), tasks.MarkReadyInput{
+		OrganizationID:  identity.OrganizationID,
+		ProjectID:       chi.URLParam(r, "projectID"),
+		TaskID:          chi.URLParam(r, "taskID"),
+		ActorUserID:     identity.UserID,
+		IdempotencyKey:  r.Header.Get("Idempotency-Key"),
+		ExpectedVersion: body.ExpectedVersion,
+		ManifestDigest:  body.ManifestDigest,
+	})
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (deps Dependencies) startTask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body startTaskRequest
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	task, replayed, err := deps.Tasks.StartExecution(r.Context(), tasks.StartExecutionInput{
+		OrganizationID:  identity.OrganizationID,
+		ProjectID:       chi.URLParam(r, "projectID"),
+		TaskID:          chi.URLParam(r, "taskID"),
+		ActorUserID:     identity.UserID,
+		IdempotencyKey:  r.Header.Get("Idempotency-Key"),
+		ExpectedVersion: body.ExpectedVersion,
+	})
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (deps Dependencies) retryTask(w http.ResponseWriter, r *http.Request) {
+	deps.runTaskControl(w, r, true)
+}
+
+func (deps Dependencies) cancelTask(w http.ResponseWriter, r *http.Request) {
+	deps.runTaskControl(w, r, false)
+}
+
+func (deps Dependencies) approveTask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body approveTaskRequest
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	task, replayed, err := deps.Tasks.ApproveTask(r.Context(), tasks.TaskApproveInput{
+		TaskControlInput: tasks.TaskControlInput{
+			OrganizationID:  identity.OrganizationID,
+			ProjectID:       chi.URLParam(r, "projectID"),
+			TaskID:          chi.URLParam(r, "taskID"),
+			ActorUserID:     identity.UserID,
+			IdempotencyKey:  r.Header.Get("Idempotency-Key"),
+			ExpectedVersion: body.ExpectedVersion,
+			Reason:          body.Reason,
+		},
+		HeadSHA: strings.ToLower(strings.TrimSpace(body.HeadSHA)),
+	})
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (deps Dependencies) requestTaskChanges(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body controlTaskRequest
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	task, replayed, err := deps.Tasks.RequestChanges(r.Context(), tasks.TaskChangesInput{
+		TaskControlInput: tasks.TaskControlInput{
+			OrganizationID:  identity.OrganizationID,
+			ProjectID:       chi.URLParam(r, "projectID"),
+			TaskID:          chi.URLParam(r, "taskID"),
+			ActorUserID:     identity.UserID,
+			IdempotencyKey:  r.Header.Get("Idempotency-Key"),
+			ExpectedVersion: body.ExpectedVersion,
+		},
+		Reason: body.Reason,
+	})
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (deps Dependencies) mergeTask(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	if deps.GitHub == nil {
+		writeError(w, http.StatusServiceUnavailable, "merge_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body controlTaskRequest
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	task, replayed, err := deps.Tasks.MergeTask(r.Context(), tasks.TaskControlInput{
+		OrganizationID:  identity.OrganizationID,
+		ProjectID:       chi.URLParam(r, "projectID"),
+		TaskID:          chi.URLParam(r, "taskID"),
+		ActorUserID:     identity.UserID,
+		IdempotencyKey:  r.Header.Get("Idempotency-Key"),
+		ExpectedVersion: body.ExpectedVersion,
+		Reason:          body.Reason,
+	}, deps.GitHub)
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	writeJSON(w, http.StatusOK, task)
+}
+
+func (deps Dependencies) getTaskPullRequest(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	pr, err := deps.Tasks.GetPullRequest(r.Context(), identity.OrganizationID,
+		chi.URLParam(r, "projectID"), chi.URLParam(r, "taskID"))
+	if err != nil {
+		writeTaskError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, pr)
+}
+
+func (deps Dependencies) runTaskControl(w http.ResponseWriter, r *http.Request, retry bool) {
+	w.Header().Set("Cache-Control", "no-store")
+	if deps.Tasks == nil {
+		writeError(w, http.StatusServiceUnavailable, "service_unavailable")
+		return
+	}
+	identity, ok := r.Context().Value(identityContextKey{}).(auth.Identity)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body controlTaskRequest
+	if err := decodeJSONRequest(w, r, &body); err != nil {
+		writeRequestDecodeError(w, err)
+		return
+	}
+	input := tasks.TaskControlInput{
+		OrganizationID:  identity.OrganizationID,
+		ProjectID:       chi.URLParam(r, "projectID"),
+		TaskID:          chi.URLParam(r, "taskID"),
+		ActorUserID:     identity.UserID,
+		IdempotencyKey:  r.Header.Get("Idempotency-Key"),
+		ExpectedVersion: body.ExpectedVersion,
+		Reason:          body.Reason,
+	}
+	var task tasks.Task
+	var replayed bool
+	var err error
+	if retry {
+		task, replayed, err = deps.Tasks.RetryTask(r.Context(), input)
+	} else {
+		task, replayed, err = deps.Tasks.CancelTask(r.Context(), input)
+	}
 	if err != nil {
 		writeTaskError(w, err)
 		return
@@ -218,10 +493,36 @@ func writeTaskError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "idempotency_key_conflict")
 	case errors.Is(err, tasks.ErrIdempotencyInProgress):
 		writeError(w, http.StatusConflict, "idempotency_request_in_progress")
+	case errors.Is(err, tasks.ErrTaskIncomplete):
+		var incomplete *tasks.IncompleteTaskError
+		missing := []string{}
+		if errors.As(err, &incomplete) {
+			missing = incomplete.Missing
+		}
+		writeJSON(w, http.StatusConflict, struct {
+			Error   string   `json:"error"`
+			Missing []string `json:"missing"`
+		}{Error: "task_incomplete", Missing: missing})
 	case errors.Is(err, tasks.ErrInvalidTransition):
 		writeError(w, http.StatusConflict, "invalid_state_transition")
 	case errors.Is(err, tasks.ErrTaskVersionConflict):
 		writeError(w, http.StatusConflict, "stale_task_version")
+	case errors.Is(err, tasks.ErrActiveAttemptExists):
+		writeError(w, http.StatusConflict, "active_attempt_exists")
+	case errors.Is(err, tasks.ErrHeadMismatch):
+		writeError(w, http.StatusConflict, "head_sha_mismatch")
+	case errors.Is(err, tasks.ErrApprovalPrecondition):
+		writeError(w, http.StatusConflict, "approval_precondition_failed")
+	case errors.Is(err, tasks.ErrPullRequestMissing):
+		writeError(w, http.StatusNotFound, "pull_request_missing")
+	case errors.Is(err, tasks.ErrWorkspaceUnavailable):
+		writeError(w, http.StatusConflict, "workspace_unavailable")
+	case errors.Is(err, tasks.ErrStaleApproval):
+		writeError(w, http.StatusConflict, "stale_approval")
+	case errors.Is(err, tasks.ErrMergeRejected):
+		writeError(w, http.StatusConflict, "merge_rejected")
+	case errors.Is(err, tasks.ErrMergeUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "merge_unavailable")
 	default:
 		logInternalError("Task API request failed", err)
 		writeError(w, http.StatusServiceUnavailable, "service_unavailable")

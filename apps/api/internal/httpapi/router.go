@@ -15,6 +15,8 @@ import (
 	"github.com/rendr17/dioffice/apps/api/internal/directory"
 	"github.com/rendr17/dioffice/apps/api/internal/events"
 	"github.com/rendr17/dioffice/apps/api/internal/folderbridge"
+	"github.com/rendr17/dioffice/apps/api/internal/providers"
+	"github.com/rendr17/dioffice/apps/api/internal/repositories"
 	"github.com/rendr17/dioffice/apps/api/internal/tasks"
 )
 
@@ -24,8 +26,11 @@ type Dependencies struct {
 	Directory       *directory.Service
 	Tasks           *tasks.Service
 	Events          *events.Service
+	Repositories    *repositories.Service
+	Providers       *providers.Service
 	ReferenceImages ReferenceImageStore
 	FolderBridge    ProjectFolderBridge
+	GitHub          tasks.GitMergeClient
 	SecureCookies   bool
 	WebOrigin       string
 	DevAuthBypass   bool
@@ -77,10 +82,22 @@ func NewRouter(deps Dependencies) http.Handler {
 	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/auth/logout", deps.logout)
 	router.With(deps.requireIdentity).Get("/api/v1/projects", deps.listProjects)
 	router.With(deps.requireIdentity).Get("/api/v1/employees", deps.listEmployees)
+	router.With(deps.requireIdentity).Get("/api/v1/providers", deps.listProviders)
+	router.With(deps.requireIdentity, deps.requireCSRF).Put("/api/v1/providers/{providerKey}", deps.configureProvider)
 	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/folder", deps.projectFolderStatus)
 	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/folder/open", deps.openProjectFolder)
+	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/repository", deps.getProjectRepository)
+	router.With(deps.requireIdentity, deps.requireCSRF).Put("/api/v1/projects/{projectID}/repository", deps.saveProjectRepository)
 	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/tasks", deps.listTasks)
 	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/backlog", deps.saveTaskToBacklog)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/ready", deps.markTaskReady)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/start", deps.startTask)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/retry", deps.retryTask)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/cancel", deps.cancelTask)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/approve", deps.approveTask)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/request-changes", deps.requestTaskChanges)
+	router.With(deps.requireIdentity, deps.requireCSRF).Post("/api/v1/projects/{projectID}/tasks/{taskID}/merge", deps.mergeTask)
+	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/tasks/{taskID}/pull-request", deps.getTaskPullRequest)
 	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/events", deps.listEvents)
 	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/events/stream", deps.streamEvents)
 	router.With(deps.requireIdentity).Get("/api/v1/projects/{projectID}/tasks/{taskID}/reference-images/{imageID}", deps.getTaskReferenceImage)
@@ -106,7 +123,7 @@ func corsMiddleware(webOrigin string) func(http.Handler) http.Handler {
 			}
 			w.Header().Set("Access-Control-Allow-Origin", webOrigin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Idempotency-Key, X-CSRF-Token, Last-Event-ID")
 			w.Header().Set("Access-Control-Expose-Headers", "Idempotency-Replayed")
 			w.Header().Add("Vary", "Origin")

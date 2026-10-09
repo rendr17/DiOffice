@@ -4,7 +4,7 @@ Database: PostgreSQL
 
 ## Logical model and implementation status
 
-This document includes the target logical model; only the initial identity/project, task/event/outbox, and Owner-password subset is executable today. Those migrations live in `db/migrations/` and are not a complete production schema. Remaining workflow tables and constraints must be added as versioned migrations before those features ship. Use state, event, and execution contracts linked from `PRD.md` as the source of truth.
+This document includes the target logical model. The executable subset today covers identity/project, Owner password, task/event/outbox, task reference images, the execution layer (workspaces, execution attempts, agent sessions, approvals, pull requests, artifacts), checks verification columns, and the runtime-provider registry (`provider_configs`). Those migrations live in `db/migrations/` and are not a complete production schema; `task_comments` remains logical-only. Use state, event, and execution contracts linked from `PRD.md` as the source of truth.
 
 
 ## organizations
@@ -107,20 +107,22 @@ This document includes the target logical model; only the initial identity/proje
 - body
 - created_at
 
-## execution_attempts
+## execution_attempts (implemented)
 
 - id, organization_id, project_id, task_id, employee_id, attempt_number
 - state, runtime_type, runtime_session_id nullable
+- checks_state, checks_started_at nullable, candidate_sha nullable (checks verification claim marker + tested SHA)
+- pr_state, pr_started_at nullable, pr_failure_count, pr_last_error nullable (PR publication claim marker + bounded retry)
 - started_at, ended_at nullable, error_code nullable, retryable
 - unique (task_id, attempt_number); enforce at most one active attempt per task
 
-## workspaces
+## workspaces (implemented)
 
-- id, organization_id, project_id, task_id, branch_name, worktree_ref
+- id, organization_id, project_id, task_id, branch_name, worktree_ref nullable until provisioning allocates the worktree
 - state, container_id nullable, created_at, retained_until nullable, cleaned_at nullable
 - unique writable workspace per task; never persist a host path in owner-visible events
 
-## agent_sessions
+## agent_sessions (implemented)
 
 - id, task_id, attempt_id, employee_id, workspace_id
 - runtime_type, runtime_session_id nullable, status, started_at, ended_at nullable
@@ -140,7 +142,7 @@ Indexes/constraints:
 - Persist event/state/history/outbox atomically; assign sequence transactionally at trusted ingestion.
 - Payload contract is in `EVENT_SCHEMA.md` and `schemas/event-envelope.schema.json`.
 
-## approvals
+## approvals (implemented)
 
 - id, organization_id, project_id, task_id, attempt_id nullable
 - requested_by_employee_id nullable, action_type, action_digest, policy_version, expires_at
@@ -153,7 +155,7 @@ Indexes/constraints:
 - unique (event_id); durable retry and idempotent publication
 
 
-## Pull Requests
+## Pull Requests (implemented)
 
 - id, organization_id, project_id, task_id, repository_id
 - provider, external_pr_id, url, branch_name, head_sha, base_sha, state
@@ -162,12 +164,21 @@ Indexes/constraints:
 
 
 
-## Artifacts
+## Artifacts (implemented)
 
 - id, organization_id, project_id, task_id, attempt_id nullable, session_id nullable
 - kind, storage_key (private server-side only), mime_type, size_bytes, sha256
 - created_at, expires_at nullable
 - storage key is never exposed in events or API payloads; authorize each download against tenant/project/task
+
+## provider_configs (implemented)
+
+- id, organization_id, provider_key (`opencode|codex|claude` catalog keys), label
+- base_url nullable (bare http(s) origin; http only on loopback — enforced by the service)
+- credential_env nullable — NAME of a runner-host env var only; secret values are never stored
+- enabled, created_at, updated_at
+- unique (organization_id, provider_key); configuration writes are audited org-scoped
+- the session runner resolves each attempt's runtime_type through this registry; `OPENCODE_SERVER_URL` is the dev fallback for unconfigured orgs
 
 ## Key constraints
 

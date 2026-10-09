@@ -1,9 +1,9 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import type { Employee, Task } from './api';
+import { useEffect, useId, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import type { Employee, ProviderInfo, PullRequestInfo, Repository, SaveProviderInput, Task } from './api';
 import type { EventConnection, ProjectActivity } from './project-events';
 import { clampWindowDrag, getStudioArea, getStudioAvatarAnimation, getStudioCameraOffset, getStudioScale, initialStudioAvatar, STUDIO_AREAS, STUDIO_AVATAR_HEIGHT, STUDIO_AVATAR_WIDTH, STUDIO_EMPLOYEE_X, STUDIO_GROUND_Y, STUDIO_OBSTACLES, STUDIO_PLATFORMS, STUDIO_WORKSTATION_X, STUDIO_WORLD_HEIGHT, STUDIO_WORLD_WIDTH, stepStudioAvatar, type StudioArea, type StudioInput } from './studio-navigation';
 
-export type PixelIconName = 'office' | 'board' | 'team' | 'monitor' | 'plus' | 'arrow' | 'leaf' | 'lock' | 'close' | 'paper' | 'refresh';
+export type PixelIconName = 'office' | 'board' | 'team' | 'monitor' | 'plus' | 'arrow' | 'leaf' | 'lock' | 'close' | 'paper' | 'refresh' | 'check' | 'alert' | 'link';
 
 const iconPaths: Record<PixelIconName, string> = {
   office: 'M7 1h2v2h2v2h2v2h2v8H1V7h2V5h2V3h2zm-4 8v4h3V9zm7 0v4h3V9z',
@@ -17,6 +17,9 @@ const iconPaths: Record<PixelIconName, string> = {
   close: 'M2 1h2v2h2v2h4V3h2V1h2v4h-2v2h-2v2h2v2h2v4h-2v-2h-2v-2H6v2H4v2H2v-4h2V9h2V7H4V5H2z',
   paper: 'M3 1h8v2h2v2h1v10H3zm2 6v2h7V7zm0 4v2h5v-2z',
   refresh: 'M5 1h7v2h2v2h1v4H9V7h3V5h-2V3H5v2H3v5h2v2h5v2H4v-2H2v-2H1V5h2V3h2z',
+  check: 'M6 10L3 7l-2 2 5 5 9-9-2-2-7 7z',
+  alert: 'M8 1l7 14H1L8 1zM7 6v4h2V6H7zm0 5v2h2v-2H7z',
+  link: 'M6 1h5v2h3v3h2v5h-2v3h-2v2H9v-2H6v-3H4V6h2V4h2V3H6V1zm2 5H6v3h2v3h3v-2h2V7h-2V6H8z',
 };
 
 export function PixelIcon({ name, className = '' }: { name: PixelIconName; className?: string }) {
@@ -53,6 +56,213 @@ export function SaveDraftToBacklogButton({ status, pending, onSave }: { status: 
       {pending ? 'Menyimpan ke backlog…' : 'Simpan ke backlog'}
       <PixelIcon name="arrow" />
     </button>
+  );
+}
+
+export function MarkReadyButton({ status, pending, onMark }: { status: string; pending: boolean; onMark: () => void }) {
+  if (status !== 'DRAFT' && status !== 'BACKLOG') return null;
+  return (
+    <button className="secondary-button" type="button" onClick={onMark} disabled={pending}>
+      {pending ? 'Memeriksa kesiapan…' : 'Tandai READY'}
+      <PixelIcon name="arrow" />
+    </button>
+  );
+}
+
+export function StartTaskButton({ status, pending, onStart }: { status: string; pending: boolean; onStart: () => void }) {
+  if (status !== 'READY') {
+    return (
+      <button className="primary-button" type="button" disabled title="Start hanya aktif untuk task READY">
+        Start<PixelIcon name="lock" />
+      </button>
+    );
+  }
+  return (
+    <button className="primary-button" type="button" onClick={onStart} disabled={pending}>
+      {pending ? 'Memulai…' : 'Start'}
+    </button>
+  );
+}
+
+const RETRYABLE_STATUSES = new Set(['BLOCKED', 'FAILED']);
+const CANCELABLE_STATUSES = new Set(['IN_PROGRESS', 'WAITING_APPROVAL', 'BLOCKED', 'IN_REVIEW', 'FAILED']);
+
+export function RetryTaskButton({ status, pending, onRetry }: { status: string; pending: boolean; onRetry: () => void }) {
+  if (!RETRYABLE_STATUSES.has(status)) return null;
+  return (
+    <button className="secondary-button" type="button" onClick={onRetry} disabled={pending}>
+      {pending ? 'Membuka ulang…' : 'Ulangi (ke READY)'}
+      <PixelIcon name="arrow" />
+    </button>
+  );
+}
+
+export function CancelTaskButton({ status, pending, onCancel }: { status: string; pending: boolean; onCancel: () => void }) {
+  if (!CANCELABLE_STATUSES.has(status)) return null;
+  return (
+    <button className="danger-button" type="button" onClick={onCancel} disabled={pending}>
+      {pending ? 'Membatalkan…' : 'Batalkan task'}
+    </button>
+  );
+}
+
+export function PullRequestReview({
+  status,
+  pullRequest,
+  loading,
+  pending,
+  onApprove,
+  onRequestChanges,
+  onMerge,
+}: {
+  status: string;
+  pullRequest: PullRequestInfo | null;
+  loading: boolean;
+  pending: boolean;
+  onApprove: (headSha: string) => void;
+  onRequestChanges?: (reason: string) => void;
+  onMerge?: () => void;
+}) {
+  const [changesReason, setChangesReason] = useState('');
+  if (status !== 'IN_REVIEW' && status !== 'DONE') return null;
+  if (status === 'DONE') {
+    const open = pullRequest && (pullRequest.state === 'OPEN' || pullRequest.state === 'DRAFT');
+    return (
+      <section className="pr-review pixel-panel">
+        <p className="runtime-boundary"><PixelIcon name="check" />Task DONE — Owner menyetujui head SHA {pullRequest ? <code>{pullRequest.headSha.slice(0, 8)}…</code> : 'yang tercatat'}.</p>
+        {loading ? (
+          <p className="empty-message">Memuat evidence pull request…</p>
+        ) : pullRequest && open && onMerge ? (
+          <>
+            <p className="form-footnote">Merge adalah aksi Owner terpisah — DiOffice memverifikasi approval non-stale lalu memanggil GitHub dengan precondition SHA yang disetujui ({pullRequest.headSha.slice(0, 8)}…).</p>
+            <button type="button" className="primary-button" disabled={pending} onClick={onMerge}>
+              {pending ? 'Menggabungkan…' : `Gabungkan PR #${pullRequest.number} di GitHub`}
+            </button>
+          </>
+        ) : pullRequest && pullRequest.state === 'MERGED' ? (
+          <p className="runtime-boundary"><PixelIcon name="check" />PR #{pullRequest.number} sudah tergabung (MERGED){pullRequest.mergedAt ? ` pada ${pullRequest.mergedAt}` : ''}.</p>
+        ) : pullRequest ? (
+          <p className="runtime-boundary"><PixelIcon name="alert" />PR #{pullRequest.number} berstatus {pullRequest.state} — tidak bisa digabungkan.</p>
+        ) : (
+          <p className="empty-message">Evidence pull request tidak tercatat.</p>
+        )}
+      </section>
+    );
+  }
+  if (loading) {
+    return <section className="pr-review pixel-panel"><p className="empty-message">Memuat evidence pull request…</p></section>;
+  }
+  if (!pullRequest) {
+    return (
+      <section className="pr-review pixel-panel">
+        <p className="runtime-boundary"><PixelIcon name="alert" />Task IN_REVIEW tapi evidence pull request tidak ditemukan — approve tidak bisa dilakukan.</p>
+      </section>
+    );
+  }
+  return (
+    <section className="pr-review pixel-panel">
+      <div className="window-bar"><span className="window-label"><PixelIcon name="link" />PULL REQUEST</span><span className="provider-adapter-badge" data-implemented={pullRequest.state === 'OPEN'}>{pullRequest.state}</span></div>
+      <dl className="task-detail-meta pr-review-meta">
+        <div><dt>PR</dt><dd><a href={pullRequest.url} target="_blank" rel="noreferrer">#{pullRequest.number} — {pullRequest.url}</a></dd></div>
+        <div><dt>Branch</dt><dd><code>{pullRequest.branchName}</code></dd></div>
+        <div><dt>Head SHA (disetujui)</dt><dd><code>{pullRequest.headSha}</code></dd></div>
+        <div><dt>Base SHA</dt><dd><code>{pullRequest.baseSha.slice(0, 12)}…</code></dd></div>
+      </dl>
+      <p className="form-footnote">Approve mengikat SHA persis ini — head berubah setelah approve membuat approval stale dan task kembali IN_REVIEW. Merge tetap aksi Owner terpisah.</p>
+      <button type="button" className="primary-button" disabled={pending} onClick={() => onApprove(pullRequest.headSha)}>
+        {pending ? 'Menyetujui…' : `Setujui SHA ${pullRequest.headSha.slice(0, 8)}… → DONE`}
+      </button>
+      {onRequestChanges && (
+        <div className="pr-changes">
+          <label className="form-footnote" htmlFor="pr-changes-reason">Minta perubahan — task kembali IN_PROGRESS dan Deni merevisi worktree + PR ini (feedback wajib):</label>
+          <textarea id="pr-changes-reason" rows={3} maxLength={2000} disabled={pending}
+            value={changesReason} onChange={(event) => setChangesReason(event.target.value)}
+            placeholder="Contoh: tambahkan validasi input untuk field email dan perbarui testnya." />
+          <button type="button" className="secondary-button" disabled={pending || !changesReason.trim()}
+            onClick={() => onRequestChanges(changesReason)}>
+            {pending ? 'Mengirim…' : 'Kirim permintaan perubahan → IN_PROGRESS'}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
+export function ManifestDigestField({ value, pending, onChange }: { value: string; pending: boolean; onChange: (digest: string) => void }) {
+  const inputId = useId();
+  const fileInput = useRef<HTMLInputElement>(null);
+  const digestFromFile = async (file: File) => {
+    const bytes = await file.arrayBuffer();
+    const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+    onChange(Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(''));
+    if (fileInput.current) fileInput.current.value = '';
+  };
+  return (
+    <div className="manifest-digest-field">
+      <label htmlFor={inputId}>Digest manifest <code>.dioffice/execution.json</code></label>
+      <div className="manifest-digest-controls">
+        <input
+          id={inputId}
+          type="text"
+          inputMode="text"
+          spellCheck={false}
+          placeholder="SHA-256 dari isi file manifest"
+          value={value}
+          disabled={pending}
+          onChange={(event) => onChange(event.target.value.trim().toLowerCase())}
+        />
+        <input
+          ref={fileInput}
+          type="file"
+          accept=".json,application/json"
+          className="visually-hidden"
+          aria-label="Hitung digest dari file manifest"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void digestFromFile(file);
+          }}
+        />
+        <button type="button" className="text-button" disabled={pending} onClick={() => fileInput.current?.click()}>
+          Hitung dari file
+        </button>
+      </div>
+      {value && /^[0-9a-f]{64}$/u.test(value) && <p className="form-footnote">Digest tercatat pada task saat READY dikonfirmasi.</p>}
+    </div>
+  );
+}
+
+export function RepositoryConnection({
+  repository,
+  pending,
+  onConnect,
+}: {
+  repository: Repository | null;
+  pending: boolean;
+  onConnect: (input: { owner: string; name: string; defaultBranch: string }) => void;
+}) {
+  const [form, setForm] = useState({ owner: '', name: '', defaultBranch: 'main' });
+  if (repository) {
+    return (
+      <p className="repository-connection">
+        <PixelIcon name="monitor" />
+        Repository <code>{repository.owner}/{repository.name}</code> · branch <code>{repository.defaultBranch}</code>
+      </p>
+    );
+  }
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onConnect(form);
+  };
+  return (
+    <form className="repository-connection repository-connection-form" onSubmit={submit}>
+      <span className="repository-connection-label"><PixelIcon name="monitor" />Repository belum terhubung</span>
+      <input type="text" placeholder="owner" aria-label="GitHub owner" value={form.owner} disabled={pending} onChange={(event) => setForm((current) => ({ ...current, owner: event.target.value }))} />
+      <input type="text" placeholder="repo" aria-label="Repository name" value={form.name} disabled={pending} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} />
+      <input type="text" placeholder="main" aria-label="Default branch" value={form.defaultBranch} disabled={pending} onChange={(event) => setForm((current) => ({ ...current, defaultBranch: event.target.value }))} />
+      <button type="submit" className="secondary-button" disabled={pending || !form.owner.trim() || !form.name.trim() || !form.defaultBranch.trim()}>
+        {pending ? 'Menghubungkan…' : 'Hubungkan'}
+      </button>
+    </form>
   );
 }
 
@@ -386,4 +596,84 @@ export function AttachmentPreview({ file }: { file: File }) {
     return () => URL.revokeObjectURL(objectURL);
   }, [file]);
   return url ? <img className="attachment-preview" src={url} alt={`Preview ${file.name}`} /> : <PixelIcon name="paper" />;
+}
+
+function ProviderCard({
+  provider,
+  pending,
+  onSave,
+}: {
+  provider: ProviderInfo;
+  pending: boolean;
+  onSave: (input: SaveProviderInput) => void;
+}) {
+  const fieldId = useId();
+  const [form, setForm] = useState<SaveProviderInput>({
+    label: provider.label,
+    baseUrl: provider.baseUrl ?? '',
+    credentialEnv: provider.credentialEnv ?? '',
+    enabled: provider.enabled,
+  });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    onSave(form);
+  };
+  const adapterLabel = provider.adapterStatus === 'implemented'
+    ? 'Adapter tersedia'
+    : 'Terdaftar — adapter belum diimplementasikan';
+  return (
+    <article className="provider-card pixel-panel" data-enabled={provider.enabled || undefined}>
+      <div className="window-bar">
+        <span className="window-label"><PixelIcon name="monitor" />{provider.displayName}</span>
+        <span className="provider-adapter-badge" data-implemented={provider.adapterStatus === 'implemented'}>{adapterLabel}</span>
+      </div>
+      <form className="provider-card-body" onSubmit={submit}>
+        <label htmlFor={`${fieldId}-label`}>Label</label>
+        <input id={`${fieldId}-label`} type="text" value={form.label} maxLength={80} disabled={pending}
+          onChange={(event) => setForm((current) => ({ ...current, label: event.target.value }))} />
+        {provider.needsBaseUrl && <>
+          <label htmlFor={`${fieldId}-url`}>Endpoint server</label>
+          <input id={`${fieldId}-url`} type="url" placeholder="http://127.0.0.1:4096" value={form.baseUrl} disabled={pending}
+            onChange={(event) => setForm((current) => ({ ...current, baseUrl: event.target.value }))} />
+        </>}
+        <label htmlFor={`${fieldId}-cred`}>Nama env credential</label>
+        <input id={`${fieldId}-cred`} type="text" placeholder={provider.needsCredential ? 'mis. OPENAI_API_KEY' : 'opsional'} value={form.credentialEnv} disabled={pending}
+          onChange={(event) => setForm((current) => ({ ...current, credentialEnv: event.target.value.toUpperCase() }))} />
+        <label className="provider-enable" htmlFor={`${fieldId}-enabled`}>
+          <input id={`${fieldId}-enabled`} type="checkbox" checked={form.enabled} disabled={pending}
+            onChange={(event) => setForm((current) => ({ ...current, enabled: event.target.checked }))} />
+          Aktifkan provider ini
+        </label>
+        <p className="form-footnote">Nilai credential tidak pernah disimpan — hanya nama env var di host runner.</p>
+        <button type="submit" className="secondary-button" disabled={pending}>
+          {pending ? 'Menyimpan…' : provider.configured ? 'Simpan perubahan' : 'Tambahkan provider'}
+        </button>
+      </form>
+    </article>
+  );
+}
+
+export function ProvidersPanel({
+  providers,
+  pendingKey,
+  onSave,
+}: {
+  providers: ProviderInfo[];
+  pendingKey: string | null;
+  onSave: (providerKey: string, input: SaveProviderInput) => void;
+}) {
+  if (providers.length === 0) {
+    return <p className="empty-message">Katalog provider kosong.</p>;
+  }
+  return (
+    <section className="providers-grid" aria-label="Runtime providers">
+      <p className="panel-hint">
+        Provider yang aktif dipakai saat attempt dimulai. OpenCode sudah terimplementasi; Codex dan Claude terdaftar tapi adapternya belum ada — task dengan runtime tersebut gagal dengan <code>provider_not_implemented</code>, tidak pernah berpura-pura berjalan.
+      </p>
+      {providers.map((provider) => (
+        <ProviderCard key={provider.key} provider={provider} pending={pendingKey === provider.key}
+          onSave={(input) => onSave(provider.key, input)} />
+      ))}
+    </section>
+  );
 }

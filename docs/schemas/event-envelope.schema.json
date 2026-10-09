@@ -1917,6 +1917,7 @@
               "permission_expansion",
               "check_override",
               "merge",
+              "review_approve",
               "other"
             ]
           },
